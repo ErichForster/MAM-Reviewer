@@ -23245,6 +23245,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="sb-head">
       <h1>Austruss Reviews</h1>
       <p>MAM · QAM · YAM</p>
+      <div id="sb-user" style="font-size:11px;color:#8BA8C0;margin-top:6px"></div>
     </div>
     <div class="sb-actions">
       <button class="btn-new" onclick="newReview()">+ New review</button>
@@ -23257,7 +23258,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
     <div class="sb-tabs">
       <button class="sb-tab sb-tab-active" id="sb-tab-reviews" onclick="setSidebarView('reviews')">Reviews</button>
       <button class="sb-tab" id="sb-tab-template" onclick="setSidebarView('template')">Templates</button>
-      <button class="sb-tab" id="sb-tab-settings" onclick="setSidebarView('settings')">Sync</button>
+      <button class="sb-tab" id="sb-tab-settings" onclick="setSidebarView('settings')">Account</button>
     </div>
     <div class="history" id="historyList"></div>
     <div class="template-panel" id="templatePanel" style="display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0"></div>
@@ -23345,18 +23346,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
-let reviews = JSON.parse(localStorage.getItem('mam_reviews_v2') || '[]');
-let auditTemplates = JSON.parse(localStorage.getItem('mam_audit_templates') || '[]');
-let activeTemplateId = localStorage.getItem('mam_active_template') || null;
-let behavTemplates = JSON.parse(localStorage.getItem('mam_behav_templates') || '[]');
-let activeBehavTemplateId = localStorage.getItem('mam_active_behav_template') || null;
+// Everything lives in the online database (worker.js); loadData() fills these
+// in after sign-in. Before 2026-10-08 they were kept in localStorage and
+// copied to a Google Sheet — see offerLocalUpload() / importFromSheet().
+let reviews = [];
+let auditTemplates = [];
+let activeTemplateId = null;
+let behavTemplates = [];
+let activeBehavTemplateId = null;
+let savedInfo = {};   // review id → {updated, by}: the server's copy each review was loaded from
+let me = null;        // the signed-in reviewer {id, name, role}
 let current = null;
 let dirty = false;
 let currentMode = 'MAM';
 let sidebarView = 'reviews'; // 'reviews' | 'template'
 let collapsedGroups = {};
-let syncUrl = localStorage.getItem('mam_sync_url') || 'https://script.google.com/macros/s/AKfycbwOECxnMiRSta71dXNlWQvKY9CrMUGYc0L6IOA688Rd6PXnfBrhqhl3L1Vf2T0WgVJj/exec';
-let syncEnabled = localStorage.getItem('mam_sync_enabled') !== null ? localStorage.getItem('mam_sync_enabled') === 'true' : true;
+// The old Google Sheet sync (Apps Script). Only used by the one-off "Copy from
+// Google Sheet" in the Account tab; nothing is sent to it any more.
+const OLD_SHEET_URL = 'https://script.google.com/macros/s/AKfycbwOECxnMiRSta71dXNlWQvKY9CrMUGYc0L6IOA688Rd6PXnfBrhqhl3L1Vf2T0WgVJj/exec';
 
 const DEFAULT_AUDIT_ROWS = [
   {criteria:"RFIs: All project RFIs closed out with detailed records.",pass:"",notes:""},
@@ -23432,14 +23439,20 @@ function showToast(msg, color){
   setTimeout(()=>t.classList.remove('show'), 2400);
 }
 
-function save(){
-  localStorage.setItem('mam_reviews_v2', JSON.stringify(reviews));
-}
+// Template edits save themselves a moment after the last change (the name and
+// criteria boxes call this on every edit).
+let templateSaveTimer = null;
 function saveTemplates(){
-  localStorage.setItem('mam_audit_templates', JSON.stringify(auditTemplates));
-  localStorage.setItem('mam_active_template', activeTemplateId||'');
-  localStorage.setItem('mam_behav_templates', JSON.stringify(behavTemplates));
-  localStorage.setItem('mam_active_behav_template', activeBehavTemplateId||'');
+  clearTimeout(templateSaveTimer);
+  templateSaveTimer = setTimeout(pushTemplates, 700);
+}
+async function pushTemplates(){
+  templateSaveTimer = null;
+  try{
+    await api('PUT', '/api/templates', {auditTemplates, activeTemplateId, behavTemplates, activeBehavTemplateId});
+  } catch(err){
+    showToast('Templates not saved: ' + err.message, 'var(--red)');
+  }
 }
 function getActiveTemplate(){
   if(!activeTemplateId) return null;
@@ -23570,14 +23583,7 @@ function renderTemplatePanel(){
   const btmpl = getActiveBehavTemplate();
   let html = `<div style="padding:10px 12px;flex:1;overflow-y:auto;min-height:0">`;
 
-  // ── Push templates to Google Sheet ──────────────────────────────────────
-  const pushDisabled = !syncUrl;
-  html += `<button onclick="pushTemplatesNow()" ${pushDisabled?'disabled':''} style="width:100%;padding:7px 8px;background:${pushDisabled?'var(--bg4)':'var(--brand)'};color:${pushDisabled?'var(--txt3)':'#fff'};border:none;border-radius:var(--radius);font-size:12px;font-weight:600;cursor:${pushDisabled?'not-allowed':'pointer'};margin-bottom:6px">↑ Save templates to Google Sheet</button>`;
-  if(pushDisabled){
-    html += `<div style="font-size:10px;color:var(--txt3);margin-bottom:10px;line-height:1.5">Set a sync URL in the Sync tab first.</div>`;
-  } else {
-    html += `<div id="tmpl-push-status" style="font-size:10px;color:var(--txt3);margin-bottom:10px;min-height:14px"></div>`;
-  }
+  html += `<div style="font-size:10px;color:var(--txt3);margin-bottom:10px;line-height:1.5">Template changes save online by themselves and are shared with every reviewer.</div>`;
 
   // ── Audit criteria templates ──────────────────────────────────────────
   html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--purple);margin-bottom:6px;padding-top:2px">Section 5 — Audit criteria</div>`;
@@ -23725,7 +23731,7 @@ function newReview(){
     openDialog(
       'Unsaved changes',
       'Save the current review before starting a new one?',
-      ()=>{saveReview();createNew();},  // Confirm = save then proceed
+      ()=>{saveReview().then(ok=>{ if(ok) createNew(); });},  // Confirm = save then proceed
       ()=>{createNew();}               // Discard = throw away changes and proceed
     );
     return;
@@ -23765,7 +23771,7 @@ function loadReview(idx){
     openDialog(
       'Unsaved changes',
       'Save the current review before switching?',
-      ()=>{saveReview();doLoad(idx);},  // Confirm = save then switch
+      ()=>{saveReview().then(ok=>{ if(ok) doLoad(idx); });},  // Confirm = save then switch
       ()=>{doLoad(idx);}               // Discard = throw away changes and switch
     );
     return;
@@ -24011,34 +24017,55 @@ function collectForm(){
 }
 
 // ── Save / Delete ──────────────────────────────────────────────────────────
-function saveReview(){
+async function saveReview(force){
   collectForm();
-  const idx = reviews.findIndex(r=>r.id===current.id);
-  if(idx>=0) reviews[idx]=current; else reviews.push(current);
-  save(); dirty=false;
+  const review = JSON.parse(JSON.stringify(current));
+  const key = String(review.id);
+  let res;
+  try{
+    res = await api('PUT', '/api/reviews/' + encodeURIComponent(key),
+      {review, base: savedInfo[key] ? savedInfo[key].updated : null, force: !!force});
+  } catch(err){
+    if(err.status === 409){
+      // Someone else saved this review since it was opened here.
+      const when = err.data.saved && err.data.saved.updated ? new Date(err.data.saved.updated).toLocaleString() : '';
+      openDialog('Saved by someone else',
+        `${err.message}${when ? ' (' + when + ')' : ''} Save yours over the top of theirs? Cancel keeps yours open but unsaved.`,
+        ()=>saveReview(true));
+      return false;
+    }
+    showToast('Not saved: ' + err.message, 'var(--red)');
+    return false;
+  }
+  savedInfo[key] = res.saved;
+  const idx = reviews.findIndex(r=>String(r.id)===key);
+  if(idx>=0) reviews[idx]=review; else reviews.push(review);
+  if(current && String(current.id)===key) dirty=false;
   showToast('Review saved');
   refreshDataLists();
   renderHistory();
-  // Sync to Google Sheets if enabled
-  pushReviewToSheet(current);
+  return true;
 }
 
 function confirmDelete(){
   if(!current) return;
   openDialog('Delete review',`Delete "${current.period||'this review'}" for ${current.designer||'unknown'}? This cannot be undone.`,deleteReview);
 }
-function deleteReview(){
-  const idx=reviews.findIndex(r=>r.id===current.id);
-  const deletedId = current.id;
+async function deleteReview(){
+  const key = String(current.id);
+  try{
+    await api('DELETE', '/api/reviews/' + encodeURIComponent(key));
+  } catch(err){
+    showToast('Not deleted: ' + err.message, 'var(--red)');
+    return;
+  }
+  const idx=reviews.findIndex(r=>String(r.id)===key);
   if(idx>=0) reviews.splice(idx,1);
-  save(); current=null; dirty=false;
+  delete savedInfo[key];
+  current=null; dirty=false;
   document.getElementById('topbar').style.display='none';
   document.getElementById('formBody').innerHTML='<div class="empty" id="emptyState"><h2>No review selected</h2><p>Create a new review or select one from the sidebar</p></div>';
   renderHistory();
-  // Notify sheet of deletion
-  if(syncEnabled && syncUrl){
-    scriptPost({action:'delete', reviewId:deletedId});
-  }
 }
 
 // ── Add / Remove rows ──────────────────────────────────────────────────────
@@ -24351,12 +24378,17 @@ function importJSON(e){
       const tCount = incomingTemplates.length;
       openDialog('Import backup',
         `Merge ${rCount} review(s) and ${tCount} template(s) from this backup? Existing items with the same ID won't be duplicated.`,
-        ()=>{
-          incomingReviews.forEach(r=>{ if(!reviews.find(x=>x.id===r.id)) reviews.push(r); });
-          incomingTemplates.forEach(t=>{ if(!auditTemplates.find(x=>x.id===t.id)) auditTemplates.push(t); });
-          if(incomingActiveId && !activeTemplateId) activeTemplateId = incomingActiveId;
-          save(); saveTemplates(); renderHistory(); refreshDataLists();
-          showToast(`Imported ${rCount} review(s) and ${tCount} template(s)`);
+        async ()=>{
+          try{
+            const res = await api('POST', '/api/import', {
+              source: 'a backup file', reviews: incomingReviews,
+              auditTemplates: incomingTemplates, activeTemplateId: incomingActiveId,
+              behavTemplates: Array.isArray(data) ? [] : (data.behavTemplates || []),
+              activeBehavTemplateId: Array.isArray(data) ? null : (data.activeBehavTemplateId || null)
+            });
+            await loadData();
+            showToast(`Imported ${res.added} review(s) and ${res.templatesAdded} template(s)` + (res.skipped ? ` (${res.skipped} already there)` : ''));
+          } catch(err){ showToast('Import failed: ' + err.message, 'var(--red)'); }
         });
     } catch(err){ showToast('Invalid backup file', 'var(--red)'); }
     e.target.value='';
@@ -24915,239 +24947,331 @@ function buildYAMPDF(d){
   return html;
 }
 
-// ── Google Sheets sync ─────────────────────────────────────────────────────
+// ── Online database (worker.js) ────────────────────────────────────────────
+// Every reviewer signs in with their name and a 4-digit PIN. The first person
+// to open a fresh database becomes its admin and adds everyone else in the
+// Account tab.
+async function api(method, path, body){
+  const res = await fetch(path, {
+    method, credentials:'same-origin',
+    headers: body!==undefined ? {'content-type':'application/json'} : {},
+    body: body!==undefined ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(()=>({}));
+  if(res.status===401 && path!=='/api/login'){ me=null; showSignIn(false); }
+  if(!res.ok){
+    const err = new Error(data.error || ('The server answered ' + res.status));
+    err.status = res.status; err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+async function loadData(){
+  const d = await api('GET', '/api/data');
+  reviews = d.reviews || [];
+  savedInfo = d.saved || {};
+  auditTemplates = d.auditTemplates || [];
+  activeTemplateId = d.activeTemplateId || null;
+  behavTemplates = d.behavTemplates || [];
+  activeBehavTemplateId = d.activeBehavTemplateId || null;
+  refreshDataLists();
+  renderHistory();
+  if(sidebarView==='template') renderTemplatePanel();
+  if(sidebarView==='settings') renderSettingsPanel();
+}
+
+async function boot(){
+  let state;
+  try{ state = await api('GET', '/api/me'); }
+  catch(err){
+    showSignIn(false, 'Can’t reach the review database: ' + err.message);
+    return;
+  }
+  if(!state.user){ showSignIn(state.setup); return; }
+  me = state.user;
+  await startSignedIn();
+}
+
+async function startSignedIn(){
+  hideSignIn();
+  renderUserBadge();
+  try{ await loadData(); }
+  catch(err){ showToast('Couldn’t load the reviews: ' + err.message, 'var(--red)'); return; }
+  offerLocalUpload();
+}
+
+function renderUserBadge(){
+  const el = document.getElementById('sb-user');
+  if(el) el.innerHTML = me ? `Signed in as <strong style="color:#fff">${esc(me.name)}</strong>` : '';
+}
+
+// ── Sign-in screen ─────────────────────────────────────────────────────────
+function showSignIn(setup, message){
+  let el = document.getElementById('signin');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'signin';
+    el.style.cssText = 'position:fixed;inset:0;z-index:300;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
+    document.body.appendChild(el);
+  }
+  const inp = 'width:100%;padding:9px 10px;border:1px solid var(--bdr2);border-radius:var(--radius);font-size:15px;font-family:inherit;background:#fff;color:var(--txt)';
+  const lbl = 'display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--txt2);margin:12px 0 4px';
+  el.innerHTML = `
+    <form id="signin-form" style="background:var(--bg2);border-radius:var(--radius-lg);padding:24px 22px;width:100%;max-width:340px;box-shadow:0 10px 40px rgba(0,0,0,.35)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <div style="width:32px;height:32px;background:var(--brand);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:13px">AR</div>
+        <div>
+          <div style="font-size:15px;font-weight:700">Austruss Reviews</div>
+          <div style="font-size:11px;color:var(--txt3);letter-spacing:.05em;text-transform:uppercase">MAM · QAM · YAM</div>
+        </div>
+      </div>
+      ${setup ? `<p style="font-size:13px;color:var(--txt2);margin-top:14px;line-height:1.5">Nobody has signed in here yet. Pick your name and a 4-digit PIN to become the admin, then add the other reviewers in the Account tab.</p>` : ''}
+      <label for="si-name" style="${lbl}">Your name</label>
+      <input id="si-name" autocomplete="username" style="${inp}" required>
+      <label for="si-pin" style="${lbl}">${setup ? 'Choose a 4-digit PIN' : 'PIN'}</label>
+      <input id="si-pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="${setup?'new-password':'current-password'}" style="${inp};letter-spacing:.4em" required>
+      <div id="si-msg" role="alert" style="font-size:12px;color:var(--red);min-height:18px;margin-top:10px;line-height:1.4">${esc(message||'')}</div>
+      <button type="submit" class="btn-save" style="width:100%;margin-top:6px;padding:10px;font-size:14px">${setup ? 'Set up and sign in' : 'Sign in'}</button>
+    </form>`;
+  el.style.display = 'flex';
+  const form = document.getElementById('signin-form');
+  form.onsubmit = async (e)=>{
+    e.preventDefault();
+    const msg = document.getElementById('si-msg');
+    const btn = form.querySelector('button');
+    msg.textContent = ''; btn.disabled = true;
+    try{
+      const res = await api('POST', setup ? '/api/setup' : '/api/login',
+        {name: document.getElementById('si-name').value, pin: document.getElementById('si-pin').value});
+      me = res.user;
+      await startSignedIn();
+    } catch(err){
+      msg.textContent = err.message;
+      document.getElementById('si-pin').value = '';
+      btn.disabled = false;
+    }
+  };
+  setTimeout(()=>document.getElementById('si-name').focus(), 0);
+}
+function hideSignIn(){
+  const el = document.getElementById('signin');
+  if(el) el.style.display = 'none';
+}
+
+async function signOut(){
+  if(dirty && !confirm('This review has unsaved changes. Sign out anyway?')) return;
+  try{ await api('POST', '/api/logout'); } catch(err){ /* signed out either way */ }
+  me = null; reviews = []; savedInfo = {}; current = null; dirty = false;
+  document.getElementById('topbar').style.display='none';
+  document.getElementById('formBody').innerHTML='<div class="empty" id="emptyState"><h2>No review selected</h2><p>Create a new review or select one from the sidebar</p></div>';
+  renderHistory(); renderUserBadge();
+  showSignIn(false);
+}
+
+// ── Account tab ────────────────────────────────────────────────────────────
+const SB_H = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#8BA8C0;margin:16px 0 8px';
+const SB_INP = 'width:100%;padding:6px 8px;border:1px solid var(--navy-lt);border-radius:var(--radius);background:var(--navy-mid);color:#E5E7EB;font-size:12px;font-family:inherit';
+const SB_BTN = 'width:100%;padding:7px;background:none;border:1px solid var(--navy-lt);border-radius:var(--radius);font-size:11px;font-weight:600;color:#CBD5E1;cursor:pointer';
+const SB_BTN_MAIN = 'width:100%;padding:7px;background:var(--brand);border:none;border-radius:var(--radius);font-size:11px;font-weight:600;color:#fff;cursor:pointer';
+
 function renderSettingsPanel(){
   const el = document.getElementById('settingsPanel');
-  const connected = syncEnabled && syncUrl;
-  const statusDot = connected
-    ? `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px"></span>Connected`
-    : `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--txt3);margin-right:5px"></span>Not configured`;
-  const lastPulled = localStorage.getItem('mam_last_pulled') || '';
-
+  if(!me){ el.innerHTML = ''; return; }
   el.innerHTML = `
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#8BA8C0;margin-bottom:10px">Google Sheets Sync</div>
-    <div style="font-size:11px;color:#8BA8C0;line-height:1.7;margin-bottom:12px">
-      Syncs reviews to and from Google Sheets — paste your Apps Script URL below.<br>
-      <a href="https://script.google.com" target="_blank" style="color:var(--brand)">Set up Apps Script →</a>
-    </div>
-    <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#6B8099;margin-bottom:4px">Web App URL</div>
-    <textarea id="sync-url-input" placeholder="https://script.google.com/macros/s/.../exec" style="width:100%;height:60px;padding:6px 8px;border:1px solid var(--navy-lt);border-radius:var(--radius);background:var(--navy-mid);color:#CBD5E1;font-size:11px;font-family:inherit;resize:none;margin-bottom:8px">${syncUrl}</textarea>
-    <div style="display:flex;gap:5px;margin-bottom:10px">
-      <button onclick="saveSyncUrl()" style="flex:1;padding:6px;background:var(--brand);color:#fff;border:none;border-radius:var(--radius);font-size:11px;font-weight:600;cursor:pointer">Save URL</button>
-      <button onclick="testSync()" style="flex:1;padding:6px;background:none;border:1px solid var(--navy-lt);border-radius:var(--radius);font-size:11px;color:#8BA8C0;cursor:pointer">Test</button>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid var(--navy-lt)">
-      <span style="font-size:11px;color:#8BA8C0">Auto-sync on save</span>
-      <label style="position:relative;display:inline-block;width:34px;height:18px;cursor:pointer">
-        <input type="checkbox" id="sync-toggle" ${syncEnabled?'checked':''} onchange="toggleSync(this.checked)" style="opacity:0;width:0;height:0">
-        <span style="position:absolute;inset:0;background:${syncEnabled?'var(--brand)':'var(--navy-lt)'};border-radius:18px;transition:.2s"></span>
-        <span style="position:absolute;top:2px;left:${syncEnabled?'18':'2'}px;width:14px;height:14px;background:#fff;border-radius:50%;transition:.2s"></span>
-      </label>
-    </div>
-    <div style="font-size:11px;color:#6B8099;margin-top:8px;padding-top:8px;border-top:1px solid var(--navy-lt)">Status: ${statusDot}</div>
+    <div style="${SB_H};margin-top:0">You</div>
+    <div style="font-size:12px;color:#CBD5E1;margin-bottom:8px">${esc(me.name)} <span style="color:#6B8099">· ${me.role==='admin'?'admin':'reviewer'}</span></div>
+    <button onclick="signOut()" style="${SB_BTN}">Sign out</button>
 
-    <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#8BA8C0;margin-bottom:2px">Data transfer</div>
+    <div style="${SB_H}">Change your PIN</div>
+    <form onsubmit="changePin(event)" style="display:flex;flex-direction:column;gap:6px">
+      <input id="pin-current" type="password" inputmode="numeric" maxlength="4" placeholder="Current PIN" autocomplete="current-password" style="${SB_INP}">
+      <input id="pin-next" type="password" inputmode="numeric" maxlength="4" placeholder="New 4-digit PIN" autocomplete="new-password" style="${SB_INP}">
+      <button type="submit" style="${SB_BTN}">Change PIN</button>
+    </form>
 
-      <button onclick="pullFromSheet()" style="width:100%;padding:7px;background:var(--navy-mid);border:1px solid var(--brand);border-radius:var(--radius);font-size:11px;font-weight:600;color:var(--brand);cursor:pointer">↓ Pull all reviews from Sheet</button>
-      ${lastPulled ? `<div style="font-size:10px;color:#4B6580">Last pulled: ${lastPulled}</div>` : ''}
+    ${me.role==='admin' ? `
+      <div style="${SB_H}">Reviewers</div>
+      <div id="people-list" style="font-size:11px;color:#6B8099">Loading…</div>
+      <form onsubmit="addPerson(event)" style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+        <input id="np-name" placeholder="Name" style="${SB_INP}">
+        <input id="np-pin" inputmode="numeric" maxlength="4" placeholder="Their 4-digit PIN" autocomplete="off" style="${SB_INP}">
+        <label style="font-size:11px;color:#8BA8C0;display:flex;align-items:center;gap:6px"><input type="checkbox" id="np-admin"> Admin (can manage reviewers)</label>
+        <button type="submit" style="${SB_BTN_MAIN}">+ Add reviewer</button>
+      </form>
 
-      <button onclick="syncAllReviews()" style="width:100%;padding:7px;background:none;border:1px solid var(--navy-lt);border-radius:var(--radius);font-size:11px;color:#8BA8C0;cursor:pointer">↑ Push all local reviews to Sheet</button>
-    </div>
-    <div id="sync-log" style="margin-top:8px;font-size:10px;color:#6B8099;line-height:1.6;min-height:16px"></div>
+      <div style="${SB_H}">Old Google Sheet</div>
+      <div style="font-size:11px;color:#8BA8C0;line-height:1.6;margin-bottom:8px">Copies every review and template from the old Google Sheet sync into this database. Reviews that are already here are left alone, so it's safe to run again.</div>
+      <button onclick="importFromSheet()" style="${SB_BTN}">↓ Copy from Google Sheet</button>
+    ` : ''}
+
+    ${localOnlyReviews().length ? `
+      <div style="${SB_H}">This computer</div>
+      <div style="font-size:11px;color:#8BA8C0;line-height:1.6;margin-bottom:8px">${localOnlyReviews().length} review(s) saved in this browser before the move aren't in the online database.</div>
+      <button onclick="uploadLocalReviews()" style="${SB_BTN}">↑ Upload them</button>
+    ` : ''}
+
+    <div id="sync-log" style="margin-top:10px;font-size:11px;color:#8BA8C0;line-height:1.6;min-height:16px"></div>
   `;
+  if(me.role==='admin') loadPeople();
 }
-
-function saveSyncUrl(){
-  syncUrl = (document.getElementById('sync-url-input').value||'').trim();
-  localStorage.setItem('mam_sync_url', syncUrl);
-  showToast('Sync URL saved');
-  renderSettingsPanel();
-}
-
-function toggleSync(val){
-  syncEnabled = val;
-  localStorage.setItem('mam_sync_enabled', val ? 'true' : 'false');
-  renderSettingsPanel();
-}
-
-// ── Google Sheets sync (CORS-safe) ────────────────────────────────────────
-// Apps Script blocks fetch() from local files due to CORS.
-// We use a hidden iframe + form POST which bypasses CORS entirely.
-
-function scriptPost(payload){
-  return new Promise((resolve) => {
-    const callbackName = 'mamCb_' + Date.now();
-    const url = syncUrl + '?callback=' + callbackName + '&data=' + encodeURIComponent(JSON.stringify(payload));
-
-    // JSONP via script tag — works cross-origin for GET requests
-    const script = document.createElement('script');
-    const timer = setTimeout(() => {
-      cleanup();
-      resolve({status:'error', message:'Timeout — check URL and deployment'});
-    }, 12000);
-
-    window[callbackName] = (data) => {
-      cleanup();
-      resolve(data);
-    };
-
-    function cleanup(){
-      clearTimeout(timer);
-      delete window[callbackName];
-      if(script.parentNode) script.parentNode.removeChild(script);
-    }
-
-    script.onerror = () => { cleanup(); resolve({status:'error', message:'Network error or invalid URL'}); };
-    script.src = url;
-    document.head.appendChild(script);
-  });
-}
-
-async function testSync(){
-  if(!syncUrl){ showToast('Enter a URL first','var(--amber)'); return; }
-  setSyncLog('Testing connection…');
-  const data = await scriptPost({action:'ping'});
-  if(data.status==='ok'){
-    setSyncLog('✓ Connected — ' + (data.message||'OK'));
-    showToast('Connection successful');
-  } else {
-    setSyncLog('✗ ' + (data.message||'Could not connect'));
-  }
-}
-
-async function pushReviewToSheet(review){
-  if(!syncEnabled || !syncUrl) return;
-  const data = await scriptPost({action:'upsert', review});
-  if(data.status==='ok'){
-    setSyncLog('✓ Synced to Google Sheets at ' + new Date().toLocaleTimeString());
-    // Also push current templates so the sheet always has the latest
-    pushTemplatesToSheet();
-  } else console.warn('Sync warning:', data.message);
-}
-
-async function pushTemplatesToSheet(){
-  if(!syncUrl) return {status:'error', message:'No sync URL set'};
-  const result = await scriptPost({
-    action:'upsertTemplates',
-    templates: auditTemplates, activeTemplateId: activeTemplateId||null,
-    behavTemplates: behavTemplates, activeBehavTemplateId: activeBehavTemplateId||null
-  });
-  return result;
-}
-
-// User-facing wrapper for the "Save templates to Google Sheet" button on the Templates tab
-async function pushTemplatesNow(){
-  if(!syncUrl){ showToast('Set a sync URL in the Sync tab first','var(--amber)'); return; }
-  const statusEl = document.getElementById('tmpl-push-status');
-  if(statusEl) statusEl.textContent = 'Saving…';
-  const result = await pushTemplatesToSheet();
-  if(result.status === 'ok'){
-    const count = auditTemplates.length + behavTemplates.length;
-    if(statusEl) statusEl.textContent = `✓ Saved ${count} template(s) at ${new Date().toLocaleTimeString()}`;
-    showToast('Templates saved to Google Sheet');
-  } else {
-    if(statusEl) statusEl.textContent = '✗ ' + (result.message || 'Save failed');
-    showToast('Failed to save templates','var(--red)');
-  }
-}
-
-async function syncAllReviews(){
-  if(!syncUrl){ showToast('Enter a sync URL first','var(--amber)'); return; }
-  setSyncLog(`Pushing ${reviews.length} review(s) and templates…`);
-  let ok=0, fail=0;
-  for(const r of reviews){
-    const data = await scriptPost({action:'upsert', review:r});
-    data.status==='ok' ? ok++ : fail++;
-  }
-  // Push templates too
-  await pushTemplatesToSheet();
-  setSyncLog(`Done — ${ok} synced${fail? ', '+fail+' failed':''}.`);
-  showToast(`Synced ${ok} of ${reviews.length} reviews`);
-}
-
 function setSyncLog(msg){
   const el = document.getElementById('sync-log');
   if(el) el.textContent = msg;
 }
 
-async function pullFromSheet(opts){
-  const silent = opts && opts.silent;
-  if(!syncUrl){
-    if(!silent) showToast('Enter a sync URL first','var(--amber)');
-    return;
-  }
-  if(!silent) setSyncLog('Pulling from Google Sheets…');
-  let data;
+async function changePin(e){
+  e.preventDefault();
   try{
-    data = await scriptPost({action:'getAll'});
-  } catch(err){
-    if(!silent) setSyncLog('✗ Pull failed: could not reach the sheet.');
-    return; // fail quietly on auto-pull — don't block the app from loading
-  }
-  if(data.status !== 'ok'){
-    if(!silent) setSyncLog('✗ Pull failed: ' + (data.message||'Unknown error'));
-    return;
-  }
-
-  // Merge reviews
-  const incoming = data.reviews || [];
-  let addedR = 0, updatedR = 0;
-  incoming.forEach(r => {
-    const idx = reviews.findIndex(x => x.id === r.id);
-    if(idx >= 0){ reviews[idx] = r; updatedR++; }
-    else { reviews.push(r); addedR++; }
-  });
-  save();
-
-  // Merge audit templates — sheet version wins on conflict
-  const incomingTemplates = data.templates || [];
-  let addedT = 0;
-  incomingTemplates.forEach(t => {
-    const idx = auditTemplates.findIndex(x => x.id === t.id);
-    if(idx >= 0) auditTemplates[idx] = t;
-    else { auditTemplates.push(t); addedT++; }
-  });
-  if(!activeTemplateId && data.activeTemplateId){
-    activeTemplateId = data.activeTemplateId;
-  }
-
-  // Merge behavioural templates — sheet version wins on conflict
-  const incomingBehavTemplates = data.behavTemplates || [];
-  let addedBT = 0;
-  incomingBehavTemplates.forEach(t => {
-    const idx = behavTemplates.findIndex(x => x.id === t.id);
-    if(idx >= 0) behavTemplates[idx] = t;
-    else { behavTemplates.push(t); addedBT++; }
-  });
-  if(!activeBehavTemplateId && data.activeBehavTemplateId){
-    activeBehavTemplateId = data.activeBehavTemplateId;
-  }
-  saveTemplates();
-
-  refreshDataLists();
-  renderHistory();
-  const ts = new Date().toLocaleString();
-  localStorage.setItem('mam_last_pulled', ts);
-  const totalTemplates = incomingTemplates.length + incomingBehavTemplates.length;
-  const templateMsg = totalTemplates ? `, ${totalTemplates} template(s)` : '';
-  setSyncLog(`✓ Done — ${addedR} reviews added, ${updatedR} updated${templateMsg} (${ts})`);
-  if(!silent) showToast(`Pulled ${incoming.length} reviews + ${totalTemplates} templates`);
-  else if(addedR>0 || addedBT>0 || addedT>0) showToast(`Synced ${addedR} new review(s) from Google Sheets`);
-  renderSettingsPanel();
+    await api('POST', '/api/me/pin', {current: document.getElementById('pin-current').value, next: document.getElementById('pin-next').value});
+    document.getElementById('pin-current').value = '';
+    document.getElementById('pin-next').value = '';
+    showToast('PIN changed');
+  } catch(err){ showToast(err.message, 'var(--red)'); }
 }
 
+async function loadPeople(){
+  const el = document.getElementById('people-list');
+  if(!el) return;
+  let d;
+  try{ d = await api('GET', '/api/users'); }
+  catch(err){ el.textContent = err.message; return; }
+  el.innerHTML = d.users.map(u=>`
+    <div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--navy-lt)">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:${u.disabled?'#6B8099':'#E5E7EB'};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(u.name)}${u.role==='admin'?' <span style="color:var(--brand);font-size:10px">ADMIN</span>':''}${u.disabled?' (off)':''}</div>
+        <div style="font-size:10px;color:#6B8099">${u.lastLogin ? 'Last in ' + new Date(u.lastLogin).toLocaleDateString() : 'Never signed in'}</div>
+      </div>
+      <button onclick="resetPin('${u.id}', '${esc(u.name).replace(/'/g,'&#39;')}')" title="Set a new PIN" style="padding:3px 6px;background:none;border:1px solid var(--navy-lt);border-radius:6px;font-size:10px;color:#CBD5E1;cursor:pointer">PIN</button>
+      ${u.id!==me.id ? `<button onclick="removePerson('${u.id}', '${esc(u.name).replace(/'/g,'&#39;')}')" title="Remove" style="padding:3px 6px;background:none;border:1px solid var(--navy-lt);border-radius:6px;font-size:10px;color:#F0A58A;cursor:pointer">✕</button>` : ''}
+    </div>`).join('');
+}
+
+async function addPerson(e){
+  e.preventDefault();
+  try{
+    await api('POST', '/api/users', {
+      name: document.getElementById('np-name').value,
+      pin: document.getElementById('np-pin').value,
+      role: document.getElementById('np-admin').checked ? 'admin' : 'reviewer'
+    });
+    showToast('Reviewer added — give them their PIN');
+    document.getElementById('np-name').value = '';
+    document.getElementById('np-pin').value = '';
+    document.getElementById('np-admin').checked = false;
+    loadPeople();
+  } catch(err){ showToast(err.message, 'var(--red)'); }
+}
+
+async function resetPin(id, name){
+  const pin = prompt(`New 4-digit PIN for ${name}:`);
+  if(pin===null) return;
+  try{
+    await api('PATCH', '/api/users/' + id, {pin});
+    showToast(`${name}'s PIN changed`);
+  } catch(err){ showToast(err.message, 'var(--red)'); }
+}
+
+function removePerson(id, name){
+  openDialog('Remove reviewer', `Remove ${name}? They won't be able to sign in. Their reviews stay.`, async ()=>{
+    try{ await api('DELETE', '/api/users/' + id); loadPeople(); }
+    catch(err){ showToast(err.message, 'var(--red)'); }
+  });
+}
+
+// ── Moving the old data across ─────────────────────────────────────────────
+// The Apps Script only answers JSONP (a script tag), so this is how the
+// Sheet is read. Read-only: nothing is written back to it.
+function sheetGetAll(){
+  return new Promise((resolve) => {
+    const callbackName = 'mamCb_' + Date.now();
+    const url = OLD_SHEET_URL + '?callback=' + callbackName + '&data=' + encodeURIComponent(JSON.stringify({action:'getAll'}));
+    const script = document.createElement('script');
+    const timer = setTimeout(() => { cleanup(); resolve({status:'error', message:'The Google Sheet didn’t answer in time.'}); }, 30000);
+    window[callbackName] = (data) => { cleanup(); resolve(data); };
+    function cleanup(){
+      clearTimeout(timer);
+      delete window[callbackName];
+      if(script.parentNode) script.parentNode.removeChild(script);
+    }
+    script.onerror = () => { cleanup(); resolve({status:'error', message:'Couldn’t reach the Google Sheet.'}); };
+    script.src = url;
+    document.head.appendChild(script);
+  });
+}
+
+async function importFromSheet(){
+  setSyncLog('Reading the Google Sheet…');
+  const data = await sheetGetAll();
+  if(data.status !== 'ok'){ setSyncLog('✗ ' + (data.message || 'The Sheet didn’t send anything back.')); return; }
+  setSyncLog(`Copying ${(data.reviews||[]).length} review(s)…`);
+  try{
+    const res = await api('POST', '/api/import', {
+      source: 'the Google Sheet',
+      reviews: data.reviews || [],
+      auditTemplates: data.templates || [], activeTemplateId: data.activeTemplateId || null,
+      behavTemplates: data.behavTemplates || [], activeBehavTemplateId: data.activeBehavTemplateId || null
+    });
+    await loadData();
+    setSyncLog(`✓ Copied ${res.added} review(s) and ${res.templatesAdded} template(s)` + (res.skipped ? `; ${res.skipped} were already here.` : '.'));
+  } catch(err){ setSyncLog('✗ ' + err.message); }
+}
+
+// Reviews saved in this browser's localStorage by the old version that the
+// database doesn't have (sync was off, or a push failed).
+function localOnlyReviews(){
+  let local = [];
+  try{ local = JSON.parse(localStorage.getItem('mam_reviews_v2') || '[]'); } catch(err){ return []; }
+  if(!Array.isArray(local)) return [];
+  // Ones uploaded from here before don't count, so a review deleted online
+  // isn't offered back from an old browser copy.
+  const have = new Set(reviews.map(r=>String(r.id)).concat(movedOnline()));
+  return local.filter(r=>r && r.id!==undefined && !have.has(String(r.id)));
+}
+function movedOnline(){
+  try{ return JSON.parse(localStorage.getItem('mam_moved_online') || '[]'); } catch(err){ return []; }
+}
+
+function offerLocalUpload(){
+  // Old browser copies the database already has count as moved from now on.
+  try{
+    const local = JSON.parse(localStorage.getItem('mam_reviews_v2') || '[]');
+    const online = new Set(reviews.map(r=>String(r.id)));
+    const moved = new Set(movedOnline());
+    const fresh = Array.isArray(local) ? local.filter(r=>r && online.has(String(r.id)) && !moved.has(String(r.id))) : [];
+    if(fresh.length) localStorage.setItem('mam_moved_online', JSON.stringify([...moved, ...fresh.map(r=>String(r.id))]));
+  } catch(err){ /* only means it may ask again */ }
+  const n = localOnlyReviews().length;
+  if(!n) return;
+  openDialog('Reviews on this computer',
+    `This browser has ${n} review(s) from before the move online that aren't in the database yet. Upload them now so everyone can see them?`,
+    uploadLocalReviews);
+}
+
+async function uploadLocalReviews(){
+  const local = localOnlyReviews();
+  let tmpl = {};
+  try{
+    tmpl = {
+      auditTemplates: JSON.parse(localStorage.getItem('mam_audit_templates') || '[]'),
+      behavTemplates: JSON.parse(localStorage.getItem('mam_behav_templates') || '[]')
+    };
+  } catch(err){ /* reviews matter more than templates */ }
+  try{
+    const res = await api('POST', '/api/import', {source: 'a browser', reviews: local, ...tmpl});
+    try{ localStorage.setItem('mam_moved_online', JSON.stringify(movedOnline().concat(local.map(r=>String(r.id))))); } catch(err){ /* asks again next time */ }
+    await loadData();
+    showToast(`Uploaded ${res.added} review(s)`);
+  } catch(err){ showToast('Upload failed: ' + err.message, 'var(--red)'); }
+}
+
+window.addEventListener('beforeunload', (e)=>{
+  if(dirty){ e.preventDefault(); e.returnValue = ''; }
+});
 
 buildPeriodSelects();
-refreshDataLists();
-renderHistory();
 setSidebarView('reviews');
-
-// Auto-pull from Google Sheets on load, if sync is configured and enabled.
-// Runs quietly in the background — no toast if there's nothing to sync with.
-if(syncEnabled && syncUrl){
-  pullFromSheet({silent:true});
-}
+boot();
 </script>
 </body>
 </html>

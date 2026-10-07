@@ -1,0 +1,23 @@
+{
+  // Serves ./public (the review page); worker.js hands /api/* to the Reviews
+  // Durable Object, which holds the reviewers, reviews and templates in SQLite.
+  // No build step and no secrets: the first person to open a fresh database
+  // becomes its admin and adds everyone else.
+  "name": "austruss-mam",
+  "main": "./worker.js",
+  "compatibility_date": "2026-09-11",
+  // A Worker Custom Domain, so Cloudflare makes the DNS record itself;
+  // workers_dev keeps the workers.dev URL working alongside it.
+  "routes": [{ "pattern": "mam.austrussapps.com", "custom_domain": true }],
+  "workers_dev": true,
+  // SQLite-backed, so it's available on the free plan.
+  "durable_objects": {
+    "bindings": [{ "name": "REVIEWS", "class_name": "Reviews" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Reviews"] }],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  }
+}

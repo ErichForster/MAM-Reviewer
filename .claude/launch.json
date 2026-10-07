@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "mam-reviewer",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8103", "--bind", "127.0.0.1"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "wrangler@4", "dev", "--port", "8103", "--ip", "127.0.0.1"],
       "port": 8103
     }
   ]

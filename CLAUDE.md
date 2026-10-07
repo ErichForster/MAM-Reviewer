@@ -1,25 +1,50 @@
 # Austruss — MAM / QAM Review Tool
 
-MAM/QAM review tool; stores work in localStorage and syncs with Google Apps Script.
+MAM / QAM / YAM review tool. Reviews and templates live in an online
+database; every reviewer signs in with their name and a 4-digit PIN.
 
 ## Structure
 
-The whole app is a single self-contained `index.html` (HTML, CSS and
-JavaScript inline). There is no build step, package manager or test suite.
+- `public/index.html` — the whole page (HTML, CSS and JavaScript inline,
+  including the bundled docx/jsPDF libraries, so it's ~1 MB). No build step.
+- `worker.js` — Cloudflare Worker `austruss-mam`. Serves `public/` and hands
+  `/api/*` to the `Reviews` Durable Object, which keeps users, sessions,
+  reviews and templates in its SQLite storage. Same PIN sign-in and lock-out
+  as the Austruss Hub (`Code/Austruss-Hub/hub.js`).
+- `wrangler.jsonc` — `mam.austrussapps.com` + workers.dev. No secrets.
+
+### API (all JSON, cookie `mam_session`)
+
+- `GET /api/me`, `POST /api/setup` (first person = admin), `/api/login`, `/api/logout`
+- `GET /api/data` — every review, `saved` (id → `{updated, by}`), templates
+- `PUT /api/reviews/:id` `{review, base, force}` — `base` is the `updated` the
+  page loaded; a different one gets 409 so two people don't overwrite each other
+- `DELETE /api/reviews/:id`, `PUT /api/templates`
+- `POST /api/import` — adds reviews/templates the database doesn't have; never overwrites
+- `/api/users` (admin), `POST /api/me/pin`
+
+## History
+
+Until 2026-10-08 this was a GitHub Pages page that kept reviews in each
+browser's localStorage (`mam_reviews_v2` etc.) and synced them to a Google
+Sheet through an Apps Script (JSONP). The page still reads both, once:
+- Account tab → "Copy from Google Sheet" (admins) pulls everything from the
+  Apps Script (`OLD_SHEET_URL`), read-only.
+- On sign-in, reviews in this browser's old localStorage that the database
+  doesn't have are offered for upload. The old keys are left in place.
 
 ## Running locally
 
-`python -m http.server 8103 --bind 127.0.0.1`, then open
-http://127.0.0.1:8103/ (configured in `.claude/launch.json`).
+`npx --yes wrangler@4 dev --port 8103 --ip 127.0.0.1` from this folder
+(configured in `.claude/launch.json`), then open http://127.0.0.1:8103/.
+A fresh local database asks you to set up the first admin.
 
 ## Working rules
 
-- Work on a branch, open a PR, and let the user decide when to merge.
-  Never push directly to `main`.
+- Deploying (`npx wrangler deploy`) needs Erich's go-ahead.
 - `index.html` is large — search for the relevant section and make focused
   edits rather than rewriting the file.
 - Verify UI changes in the browser preview, including a phone-width
   layout, and check the console for errors.
-- Don't change backend URLs (Google Apps Script / Supabase) or anything
-  touching stored data formats in localStorage without calling it out, since
-  existing users' saved data depends on them.
+- The shape of a review object is what's stored in the database (as JSON) and
+  in old backups — call out any change to it.
