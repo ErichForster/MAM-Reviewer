@@ -48,3 +48,16 @@ A fresh local database asks you to set up the first admin.
   layout, and check the console for errors.
 - The shape of a review object is what's stored in the database (as JSON) and
   in old backups — call out any change to it.
+
+## Light / dark toggle (2026-10-08)
+
+Sun/moon button at the top right of the sidebar (shared spec
+`Code/.claude/theme-spec.md`). The choice is saved in the cookie `aus-theme`
+(`Domain=.austrussapps.com` on the live site, so it carries across the
+Austruss apps) plus localStorage `aus-theme`; a tiny script at the top of
+`<head>` applies it before the page draws. Nothing saved = follow the
+computer. The existing `:root` tokens get dark values (under `@media screen`);
+the sidebar stays dark in both. The PDF and Word exports build their own
+pages with fixed colours and are untouched. The YAM plugin engine still has a
+literal `#FAC775` card border (left alone: "do not edit below this line").
+New styles must use the variables, not fixed colours.

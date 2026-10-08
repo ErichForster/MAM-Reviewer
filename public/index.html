@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Austruss — MAM / QAM Review Tool</title>
+<script>
+  // Light / dark: saved choice (shared cookie across austrussapps.com, else this browser) or the computer's setting.
+  (function () { try { var m = document.cookie.match(/(?:^|;\s*)aus-theme=(light|dark)/), t = m ? m[1] : localStorage.getItem("aus-theme");
+    if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {} })();
+</script>
 <script>var docx = (function(exports) {
   "use strict";var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -23095,12 +23100,52 @@ var __async = (__this, __arguments, generator) => {
   --amber:#854F0B;--amber-bg:#FAEEDA;
   --red:#993C1D;--red-bg:#FAECE7;
   --radius:8px;--radius-lg:12px;
+  color-scheme:light;
+  --amber-bdr:#FAC775;--red-bdr:#F0997B;--signin-bg:#3D3D3D;
 }
+/* Dark palette, screen only (the PDF / Word exports build their own light pages). */
+@media screen and (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme:dark;
+    --brand-lt:#3a2810;
+    --navy:#1a1a19;--navy-mid:#232321;--navy-lt:#34342f;
+    --bg:#0d0d0d;--bg2:#1a1a19;--bg3:#232321;--bg4:#2c2c2a;
+    --txt:#ffffff;--txt2:#c3c2b7;--txt3:#898781;
+    --bdr:#2e2e2c;--bdr2:#42423e;
+    --blue:#6da7ec;--blue-bg:#16304f;--blue-bdr:#2f5a8a;--blue-txt:#a9cbf5;
+    --purple:#7b72e0;--purple-bg:#26234a;--purple-bdr:#4a4390;
+    --green:#23906f;--green-bg:#10291f;--green-bdr:#2a6e58;
+    --amber:#c27a1e;--amber-bg:#3a2f14;--amber-bdr:#6b5220;
+    --red:#e0704a;--red-bg:#3a1d1d;--red-bdr:#7a3a28;
+    --signin-bg:#0d0d0d;
+  }
+}
+@media screen{
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --brand-lt:#3a2810;
+    --navy:#1a1a19;--navy-mid:#232321;--navy-lt:#34342f;
+    --bg:#0d0d0d;--bg2:#1a1a19;--bg3:#232321;--bg4:#2c2c2a;
+    --txt:#ffffff;--txt2:#c3c2b7;--txt3:#898781;
+    --bdr:#2e2e2c;--bdr2:#42423e;
+    --blue:#6da7ec;--blue-bg:#16304f;--blue-bdr:#2f5a8a;--blue-txt:#a9cbf5;
+    --purple:#7b72e0;--purple-bg:#26234a;--purple-bdr:#4a4390;
+    --green:#23906f;--green-bg:#10291f;--green-bdr:#2a6e58;
+    --amber:#c27a1e;--amber-bg:#3a2f14;--amber-bdr:#6b5220;
+    --red:#e0704a;--red-bg:#3a1d1d;--red-bdr:#7a3a28;
+    --signin-bg:#0d0d0d;
+  }
+}
+/* Fields without their own colours follow the theme (no specificity, so every rule below wins). */
+:where(input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea){background-color:var(--bg2);color:var(--txt)}
+.themebtn{position:absolute;top:12px;right:10px;width:28px;height:28px;display:grid;place-items:center;padding:0;background:none;border:1px solid var(--navy-lt);border-radius:var(--radius);color:#8BA8C0;cursor:pointer}
+.themebtn:hover{border-color:#8BA8C0;color:#fff;background:var(--navy-lt)}
+.themebtn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 html,body{height:100%;overflow:hidden}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--txt);font-size:14px;line-height:1.5}
 .app{display:flex;height:100vh;overflow:hidden}
 .sidebar{width:242px;min-width:242px;background:var(--navy);display:flex;flex-direction:column;overflow:hidden;min-height:0}
-.sb-head{padding:14px 14px 10px;border-bottom:1px solid var(--navy-lt)}
+.sb-head{padding:14px 14px 10px;border-bottom:1px solid var(--navy-lt);position:relative}
 .sb-logo{display:flex;align-items:center;gap:9px;margin-bottom:3px}
 .sb-logo-mark{width:30px;height:30px;background:var(--brand);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#fff;flex-shrink:0}
 .sb-head h1{font-size:13px;font-weight:700;color:#fff;letter-spacing:.02em}
@@ -23145,7 +23190,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .fg{display:flex;flex-direction:column;gap:2px;flex-shrink:0}
 .fg label{font-size:10px;color:var(--txt3);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
 .fg input,.fg select{font-size:12px;padding:4px 7px;border:1px solid var(--bdr);border-radius:var(--radius);background:var(--bg3);color:var(--txt)}
-.fg input:focus,.fg select:focus{outline:none;border-color:var(--blue);background:#fff}
+.fg input:focus,.fg select:focus{outline:none;border-color:var(--blue);background:var(--bg2)}
 .mode-toggle{display:flex;border:1px solid var(--bdr);border-radius:var(--radius);overflow:hidden;flex-shrink:0}
 .mbtn{padding:5px 10px;font-size:12px;font-weight:500;background:none;border:none;cursor:pointer;color:var(--txt2)}
 .mbtn.active{background:var(--blue-bg);color:var(--blue-txt)}
@@ -23156,7 +23201,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-export:hover{background:var(--purple);color:#fff}
 .btn-export-json{padding:6px 12px;background:var(--bg3);color:var(--txt2);border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
 .btn-export-json:hover{border-color:var(--blue);color:var(--blue)}
-.btn-export-pdf{padding:6px 12px;background:var(--red-bg);color:var(--red);border:1px solid #F0997B;border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
+.btn-export-pdf{padding:6px 12px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-bdr);border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
 .btn-export-pdf:hover{background:var(--red);color:#fff}
 .btn-del{padding:6px 10px;background:none;color:var(--txt3);border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;cursor:pointer}
 .btn-del:hover{color:var(--red);border-color:var(--red)}
@@ -23170,8 +23215,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .sec-hdr{padding:10px 14px;border-bottom:1px solid var(--bdr);background:var(--bg3);display:flex;align-items:center;gap:8px}
 .sec-hdr.qam-hdr{background:var(--purple-bg);border-bottom-color:var(--purple-bdr)}
 .section.qam-sec{border-color:var(--purple-bdr)}
-.sec-hdr.yam-hdr{background:var(--amber-bg);border-bottom-color:#FAC775}
-.section.yam-sec{border-color:#FAC775}
+.sec-hdr.yam-hdr{background:var(--amber-bg);border-bottom-color:var(--amber-bdr)}
+.section.yam-sec{border-color:var(--amber-bdr)}
 .snum{width:22px;height:22px;border-radius:50%;background:var(--navy);color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .snum.q{background:var(--purple)}
 .snum.y{background:var(--amber)}
@@ -23197,7 +23242,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .add-btn:hover{border-color:var(--blue);color:var(--blue);background:var(--blue-bg)}
 .sub-label{font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:6px}
 .sub-label.mt{margin-top:14px}
-.import-prev{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--amber-bg);border:1px solid #FAC775;border-radius:var(--radius);font-size:12px;margin-bottom:10px}
+.import-prev{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--amber-bg);border:1px solid var(--amber-bdr);border-radius:var(--radius);font-size:12px;margin-bottom:10px}
 .import-prev button{padding:3px 10px;background:var(--amber);color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:500;cursor:pointer}
 .score-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:8px}
 .scard{background:var(--bg3);border-radius:var(--radius);padding:10px;text-align:center}
@@ -23214,7 +23259,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .other-list{display:flex;flex-direction:column;gap:5px}
 .other-row{display:flex;gap:5px;align-items:center}
 .other-row input{flex:1;padding:5px 8px;border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;background:var(--bg3)}
-.other-row input:focus{outline:none;border-color:var(--blue);background:#fff}
+.other-row input:focus{outline:none;border-color:var(--blue);background:var(--bg2)}
 .other-row .del-row{background:none;border:none;color:var(--txt3);cursor:pointer;font-size:14px;padding:2px 4px;border-radius:4px}
 .purpose-box{background:var(--bg3);border-radius:var(--radius);padding:10px 12px;font-size:12px;color:var(--txt2);line-height:1.7}
 .purpose-box strong{color:var(--txt);font-weight:600}
@@ -23243,6 +23288,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
   <!-- Sidebar -->
   <div class="sidebar">
     <div class="sb-head">
+      <button type="button" class="themebtn" id="themebtn" onclick="toggleTheme()"></button>
       <h1>Austruss Reviews</h1>
       <p>MAM · QAM · YAM</p>
       <div id="sb-user" style="font-size:11px;color:#8BA8C0;margin-top:6px"></div>
@@ -23345,6 +23391,35 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 </div>
 
 <script>
+// ── Light / dark ──────────────────────────────────────────────────────────
+// The sidebar button flips between the two. The choice goes in a cookie shared by
+// every *.austrussapps.com app (plus this browser's storage); the <head> script
+// applies it before the page draws. Nothing saved = follow the computer.
+const darkMq = matchMedia('(prefers-color-scheme: dark)');
+const isDark = () => (document.documentElement.dataset.theme || (darkMq.matches ? 'dark' : 'light')) === 'dark';
+const THEME_ICON = {
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+};
+function saveTheme(t){
+  const dom = location.hostname.endsWith('austrussapps.com') ? '; Domain=.austrussapps.com' : '';
+  document.cookie = `aus-theme=${t}; Path=/; Max-Age=34560000; SameSite=Lax${dom}`;
+  try { localStorage.setItem('aus-theme', t); } catch(e) { /* private window */ }
+  document.documentElement.dataset.theme = t;
+  syncThemeBtn();
+}
+function toggleTheme(){ saveTheme(isDark() ? 'light' : 'dark'); }
+function syncThemeBtn(){
+  const b = document.getElementById('themebtn');
+  if(!b) return;
+  const dark = isDark();
+  b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${THEME_ICON[dark ? 'sun' : 'moon']}</svg>`;
+  b.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  b.setAttribute('aria-label', b.title);
+}
+darkMq.addEventListener('change', syncThemeBtn);
+syncThemeBtn();
+
 // ── State ──────────────────────────────────────────────────────────────────
 // Everything lives in the online database (worker.js); loadData() fills these
 // in after sign-in. Before 2026-10-08 they were kept in localStorage and
@@ -23924,7 +23999,7 @@ function buildImportBanner(){
   const opts = past.map(p=>`<option value="${p.id}">${esc(p.period||p.date||'untitled')} (${esc(p.designer||'')})</option>`).join('');
   return `<div class="import-prev" id="import-banner">
     <span>Multiple past reviews found:</span>
-    <select id="prev-select" style="font-size:12px;padding:3px 6px;border:1px solid #FAC775;border-radius:5px;background:#fff">
+    <select id="prev-select" style="font-size:12px;padding:3px 6px;border:1px solid var(--amber-bdr);border-radius:5px;background:var(--bg2);color:var(--txt)">
       <option value="">— choose —</option>${opts}
     </select>
     <button onclick="importFromSelected()">Import goals</button>
@@ -25012,10 +25087,10 @@ function showSignIn(setup, message){
   if(!el){
     el = document.createElement('div');
     el.id = 'signin';
-    el.style.cssText = 'position:fixed;inset:0;z-index:300;background:var(--navy);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
+    el.style.cssText = 'position:fixed;inset:0;z-index:300;background:var(--signin-bg);display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto';
     document.body.appendChild(el);
   }
-  const inp = 'width:100%;padding:9px 10px;border:1px solid var(--bdr2);border-radius:var(--radius);font-size:15px;font-family:inherit;background:#fff;color:var(--txt)';
+  const inp = 'width:100%;padding:9px 10px;border:1px solid var(--bdr2);border-radius:var(--radius);font-size:15px;font-family:inherit;background:var(--bg2);color:var(--txt)';
   const lbl = 'display:block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--txt2);margin:12px 0 4px';
   el.innerHTML = `
     <form id="signin-form" style="background:var(--bg2);border-radius:var(--radius-lg);padding:24px 22px;width:100%;max-width:340px;box-shadow:0 10px 40px rgba(0,0,0,.35)">
