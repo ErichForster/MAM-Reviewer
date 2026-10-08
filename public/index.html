@@ -23203,6 +23203,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-export-json:hover{border-color:var(--blue);color:var(--blue)}
 .btn-export-pdf{padding:6px 12px;background:var(--red-bg);color:var(--red);border:1px solid var(--red-bdr);border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
 .btn-export-pdf:hover{background:var(--red);color:#fff}
+.btn-export-xlsx{padding:6px 12px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-bdr);border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
+.btn-export-xlsx:hover{background:var(--green);color:#fff}
 .btn-del{padding:6px 10px;background:none;color:var(--txt3);border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;cursor:pointer}
 .btn-del:hover{color:var(--red);border-color:var(--red)}
 .form-body{flex:1;overflow-y:auto;min-height:0;padding:18px}
@@ -23298,6 +23300,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="sb-btn-row">
         <button class="btn-sb-sm" onclick="exportJSON()" title="Download backup">↓ Backup</button>
         <button class="btn-sb-sm" onclick="triggerImportJSON()" title="Import backup">↑ Import</button>
+        <button class="btn-sb-sm" onclick="exportAllExcel()" title="Every review in one Excel workbook, with a summary sheet">↓ Excel</button>
       </div>
       <input type="file" id="importInput" accept=".json" style="display:none" onchange="importJSON(event)">
     </div>
@@ -23347,6 +23350,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
       <div class="topbar-right">
         <button class="btn-export-json" onclick="exportJSON()">↓ Backup</button>
         <button class="btn-export-pdf" onclick="exportPDF()">↓ PDF</button>
+        <button class="btn-export-xlsx" onclick="exportExcel()" title="This review as an Excel sheet">↓ Excel</button>
         <button class="btn-export" onclick="exportDocx()">↓ Word doc</button>
         <button id="notes-toggle-btn" onclick="toggleNotesPanel()" title="Internal notes (not printed)" style="padding:6px 10px;background:none;border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;color:var(--txt2);cursor:pointer">📝 Notes</button>
         <button class="btn-save" onclick="saveReview()">Save</button>
@@ -25020,6 +25024,388 @@ function buildYAMPDF(d){
     });
   });
   return html;
+}
+
+// ── Excel export ───────────────────────────────────────────────────────────
+// "↓ Excel" in the top bar = the open review as one printable sheet.
+// "↓ Excel" in the sidebar = every review: a Summary sheet (one row each,
+// filterable, linked) plus a sheet per review laid out like the PDF.
+// Internal notes are left out, as in the PDF and Word exports. ExcelJS is
+// fetched the first time someone exports.
+const XL = {
+  brand:'FFEB8519', brandLt:'FFFEF3E6', head:'FFD9E2F3', grid:'FFD4D0CA', txt:'FF1A1917', muted:'FF6B6963',
+  purple:'FF534AB7', purpleLt:'FFEEEDFE', green:'FF0F6E56', greenLt:'FFE1F5EE',
+  blue:'FF1D5FA8', blueLt:'FFE6F1FB', amber:'FF854F0B', amberLt:'FFFAEEDA', red:'FF993C1D', redLt:'FFFAECE7'
+};
+const XL_WIDTHS = [40, 20, 62];   // the three columns every review sheet is built on
+
+function loadExcelJS(){
+  if(window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  return new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    s.onload = ()=>resolve(window.ExcelJS);
+    s.onerror = ()=>reject(new Error('Couldn’t load the Excel library. Check the internet connection.'));
+    document.head.appendChild(s);
+  });
+}
+
+// The same clean-ups doLoad() makes, for reviews saved by older versions.
+function normaliseReview(r){
+  const d = JSON.parse(JSON.stringify(r));
+  if(d.auditRows && d.auditRows.length && !d.auditRows[0].criteria){
+    d.auditRows = d.auditRows.map((x,i)=>({criteria:DEFAULT_AUDIT_ROWS[i]?.criteria||'', pass:x.pass||'', notes:x.notes||''}));
+  }
+  if(!d.behavRows && d.behavScores){
+    d.behavRows = BEHAV_KEYS.map(k=>({criteria:BEHAV_LABELS[k], score:(d.behavScores||{})[k]||'', comment:(d.behavComments||{})[k]||''}));
+  }
+  d.mode = d.mode || 'MAM';
+  d.designer = String(d.designer||'').trim();
+  d.reviewer = String(d.reviewer||'').trim();
+  return d;
+}
+
+// 'YYYY-MM-DD' → a date Excel shows as that day (ExcelJS writes dates as UTC).
+function xlDate(s){
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s||'');
+  return m ? new Date(Date.UTC(+m[1], +m[2]-1, +m[3])) : null;
+}
+function niceDate(s){
+  const d = xlDate(s);
+  return d ? d.toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric', timeZone:'UTC'}) : (s||'');
+}
+// Newest first: the review date, else the period ("October 2026").
+function reviewTime(r){
+  const d = xlDate(r.date);
+  if(d) return d.getTime();
+  const p = Date.parse('1 ' + (r.period||''));
+  return isNaN(p) ? 0 : p;
+}
+
+// Excel won't grow a row to fit wrapped text in merged cells, so the height is
+// worked out from the text: roughly 1.15 characters per unit of column width
+// at 10 pt, 13.5 points a line.
+function fitRow(row, cells){
+  let lines = 1;
+  cells.forEach(([text, width])=>{
+    const per = Math.max(8, Math.floor(width * 1.15));
+    const n = String(text??'').split('\n').reduce((sum, part)=>sum + Math.max(1, Math.ceil(part.length / per)), 0);
+    lines = Math.max(lines, n);
+  });
+  row.height = Math.max(16, lines * 13.5 + 4);
+}
+
+const xlBorder = (argb)=>({style:'thin', color:{argb}});
+const xlFill = (argb)=>({type:'pattern', pattern:'solid', fgColor:{argb}});
+
+function writeReviewSheet(ws, d, opts){
+  opts = opts || {};
+  ws.columns = XL_WIDTHS.map(width=>({width}));
+  ws.properties.defaultRowHeight = 16;
+  ws.views = [{showGridLines:false}];
+  const title = `${d.mode}: ${d.mode==='MAM'?'Monthly':d.mode==='QAM'?'Quarterly':'Yearly'} Accountability Meeting Review`;
+  ws.pageSetup = {paperSize:9, orientation:'portrait', fitToPage:true, fitToWidth:1, fitToHeight:0,
+    margins:{left:0.5, right:0.5, top:0.6, bottom:0.6, header:0.3, footer:0.3}};
+  ws.headerFooter.oddFooter = `&L&8${(d.designer||'').replace(/&/g,'&&')} · ${(d.period||'').replace(/&/g,'&&')}&R&8Page &P of &N`;
+
+  let n = 0;
+  const next = ()=>ws.getRow(++n);
+  const base = {name:'Arial', size:10, color:{argb:XL.txt}};
+  const wrap = {wrapText:true, vertical:'top'};
+
+  // One line across all three columns.
+  function band(text, font, fill, edge){
+    const row = next();
+    ws.mergeCells(n, 1, n, 3);
+    const c = row.getCell(1);
+    c.value = text; c.font = {...base, ...font}; c.alignment = {vertical:'middle', wrapText:true};
+    if(fill) c.fill = xlFill(fill);
+    if(edge) c.border = {left:{style:'thick', color:{argb:edge}}};
+    fitRow(row, [[text, XL_WIDTHS[0]+XL_WIDTHS[1]+XL_WIDTHS[2]]]);
+    if(font && font.size >= 12) row.height = Math.max(row.height, 22);
+    return row;
+  }
+  const gap = ()=>{ next().height = 8; };
+  const section = (text, colour)=>{ gap(); band(text, {bold:true, size:12}, colour ? colour[1] : XL.brandLt, colour ? colour[0] : XL.brand); };
+  const sub = (text)=>band(text, {bold:true, color:{argb:XL.muted}});
+  const note = (text)=>band(text, {italic:true, size:9, color:{argb:XL.muted}});
+
+  // A table on the three columns. cols: [{label, span}] where span 2 joins B:C.
+  function table(cols, rows, styleCell){
+    const put = (values, isHead, rowData)=>{
+      const row = next();
+      let col = 1;
+      const sizes = [];
+      cols.forEach((c, i)=>{
+        const span = c.span || 1;
+        if(span > 1) ws.mergeCells(n, col, n, col + span - 1);
+        const cell = row.getCell(col);
+        cell.value = values[i] ?? '';
+        cell.font = isHead ? {...base, bold:true, size:9.5} : {...base};
+        cell.alignment = {...wrap, horizontal: c.center ? 'center' : 'left'};
+        if(isHead) cell.fill = xlFill(XL.head);
+        for(let k = col; k < col + span; k++){
+          row.getCell(k).border = {top:xlBorder(XL.grid), bottom:xlBorder(XL.grid), left:xlBorder(XL.grid), right:xlBorder(XL.grid)};
+        }
+        if(rowData && styleCell) styleCell(cell, i, rowData);
+        sizes.push([values[i], XL_WIDTHS.slice(col-1, col-1+span).reduce((a,b)=>a+b, 0)]);
+        col += span;
+      });
+      fitRow(row, sizes);
+    };
+    put(cols.map(c=>c.label), true);
+    const body = rows.filter(r=>r.some(v=>String(v??'').trim()));
+    if(!body.length) put(cols.map((c,i)=>i===0?'—':''), false, null);
+    else body.forEach(r=>put(r, false, r));
+  }
+  // A label in A and its answer across B:C, boxed like a table row.
+  function pair(label, value){
+    const row = next();
+    ws.mergeCells(n, 2, n, 3);
+    row.getCell(1).value = label;
+    row.getCell(1).font = {...base};
+    row.getCell(2).value = value || '—';
+    row.getCell(2).font = {...base, bold:true};
+    [1,2,3].forEach(k=>{
+      row.getCell(k).alignment = wrap;
+      row.getCell(k).border = {top:xlBorder(XL.grid), bottom:xlBorder(XL.grid), left:xlBorder(XL.grid), right:xlBorder(XL.grid)};
+    });
+    fitRow(row, [[label, XL_WIDTHS[0]], [value, XL_WIDTHS[1]+XL_WIDTHS[2]]]);
+  }
+  // Numbered items, one per row across the sheet.
+  function list(items){
+    const real = (items||[]).filter(x=>String(x||'').trim());
+    if(!real.length){ band('—', {color:{argb:XL.muted}}); return; }
+    real.forEach((x,i)=>band(`${i+1}.  ${x}`, {}));
+  }
+
+  // Title and details
+  const t = band(title, {bold:true, size:16});
+  t.height = 28;
+  t.getCell(1).border = {bottom:{style:'medium', color:{argb:XL.brand}}};
+  if(opts.backTo){
+    const row = next();
+    const c = row.getCell(1);
+    c.value = {text:'← Back to the summary', hyperlink:`#'${opts.backTo}'!A1`};
+    c.font = {...base, size:9, color:{argb:XL.blue}, underline:true};
+  }
+  gap();
+  [['Period', d.period], ['Date', niceDate(d.date)], ['Designer', d.designer], ['Lead reviewer', d.reviewer]].forEach(([k,v])=>{
+    const row = next();
+    row.getCell(1).value = k;
+    row.getCell(1).font = {...base, bold:true, color:{argb:XL.muted}};
+    ws.mergeCells(n, 2, n, 3);
+    row.getCell(2).value = v || '—';
+    row.getCell(2).font = {...base, bold:true};
+  });
+
+  section('1. Project review & goals');
+  sub('a. Previous month retrospective');
+  table([{label:'Previous goal'}, {label:'Status', center:true}, {label:'Notes / issues unpacked'}],
+    (d.prevGoals||[]).map(r=>[r.goal, r.status, r.notes]),
+    (cell, i, r)=>{
+      if(i!==1) return;
+      const s = r[1];
+      if(s==='Done'){ cell.fill = xlFill(XL.greenLt); cell.font = {...base, bold:true, color:{argb:XL.green}}; }
+      else if(s==='In Progress'){ cell.fill = xlFill(XL.blueLt); cell.font = {...base, color:{argb:XL.blue}}; }
+      else if(s==='Delayed'){ cell.fill = xlFill(XL.amberLt); cell.font = {...base, bold:true, color:{argb:XL.amber}}; }
+    });
+  sub('b. Current projects & next month’s goals');
+  table([{label:'Project'}, {label:'Goals for next month', span:2}], (d.projects||[]).map(r=>[r.name, r.goals]));
+
+  section('2. Recognition');
+  table([{label:'Team member'}, {label:'Why (achievement)', span:2}], (d.recognition||[]).map(r=>[r.member, r.why]));
+
+  section('3. Training & competencies');
+  note('Target: 2 training matrix skills / competencies signed off.');
+  table([{label:'Skill / competency'}, {label:'Status', center:true}, {label:''}],
+    (d.training||[]).map(r=>[r.skill, r.status, '']),
+    (cell, i, r)=>{ if(i===1 && r[1]==='Signed off'){ cell.fill = xlFill(XL.greenLt); cell.font = {...base, bold:true, color:{argb:XL.green}}; } });
+
+  section('4. Administration');
+  pair('Timesheet — all hours for the month recorded?', d.timesheet);
+
+  const qam = d.mode==='QAM' || d.mode==='YAM';
+  if(qam){
+    gap();
+    band(`${d.mode} — additional sections`, {bold:true, color:{argb:XL.purple}}, XL.purpleLt, XL.purple);
+    section('5. Drafting audit review', [XL.purple, XL.purpleLt]);
+    note('Rating: 1 Needs guidance · 2 Building understanding · 3 Competent · 4 Confident · 5 Highly proficient');
+    table([{label:'Audit criteria'}, {label:'Rating', center:true}, {label:'Notes'}],
+      (d.auditRows||[]).map(r=>{ const g = parseInt(r.pass)||0; return [r.criteria, g ? `${g} — ${AUDIT_GRADE_LABELS[g]}` : '—', r.notes]; }),
+      (cell, i, r)=>{
+        if(i!==1) return;
+        const g = parseInt(r[1])||0;
+        if(g>=4){ cell.fill = xlFill(XL.greenLt); cell.font = {...base, bold:true, color:{argb:XL.green}}; }
+        else if(g===3){ cell.fill = xlFill(XL.blueLt); cell.font = {...base, bold:true, color:{argb:XL.blue}}; }
+        else if(g>=1){ cell.fill = xlFill(XL.amberLt); cell.font = {...base, bold:true, color:{argb:XL.amber}}; }
+      });
+
+    section('6. Performance scoring', [XL.purple, XL.purpleLt]);
+    sub('a. Behavioural criteria');
+    table([{label:'Behavioural criteria'}, {label:'Score (1–5)', center:true}, {label:'Comments'}],
+      (d.behavRows||[]).map(r=>[r.criteria, r.score ? Number(r.score) : '—', r.comment]),
+      (cell, i)=>{ if(i===1) cell.font = {...base, bold:true}; });
+    sub('b. Score summary');
+    const aa = auditAvg(d), ba = behavAvg(d), ov = overallScore(d);
+    table([{label:'Measure'}, {label:'Result', center:true}, {label:''}], [
+      ['Audit average (out of 10)', aa!==null ? +scaleTo10(aa).toFixed(1) : '—', ''],
+      ['Behavioural average (out of 10)', ba!==null ? +scaleTo10(ba).toFixed(1) : '—', ''],
+      ['Overall score', ov!==null ? Math.round(ov) + '%' : '—', '']
+    ], (cell, i, r)=>{
+      if(r[0]!=='Overall score') return;
+      cell.font = {...base, bold:true};
+      cell.fill = xlFill(XL.blueLt);
+    });
+
+    section('7. Agreed payout', [XL.purple, XL.purpleLt]);
+    pair('Agreed payout this period', d.agreedPayout);
+  }
+
+  if(d.mode==='YAM'){
+    YAM_SECTIONS.forEach(sec=>{
+      const sdata = (d.yamData||{})[sec.id] || {};
+      section(sec.title, [XL.green, XL.greenLt]);
+      (sec.fields||[]).forEach(f=>{
+        sub(f.label || '');
+        if(f.type==='list') list(sdata[f.key]);
+        else if(f.type==='table'){
+          const cols = (f.columns||[]).slice(0, 3);
+          table(cols.map((c,i)=>({label:c.label, span: i===cols.length-1 ? 4-cols.length : 1})),
+            (sdata[f.key]||[]).map(row=>cols.map(c=>row[c.key])));
+        } else band(sdata[f.key] || '—', {});
+      });
+    });
+  }
+
+  section(`${qam ? (d.mode==='YAM' ? 10 : 8) : 5}. Other raised items`);
+  list(d.otherItems);
+
+  ws.pageSetup.printArea = `A1:C${n}`;
+}
+
+function xlFileName(s){ return String(s||'').trim().replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,'_'); }
+
+async function downloadWorkbook(wb, name){
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 10000);
+}
+
+function newWorkbook(ExcelJS){
+  const wb = new ExcelJS.Workbook();
+  wb.creator = me ? me.name : 'Austruss Reviews';
+  wb.created = new Date();
+  return wb;
+}
+
+// The open review, including changes not saved yet (like the PDF and Word buttons).
+async function exportExcel(){
+  if(!current) return;
+  collectForm();
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJS(); } catch(err){ showToast(err.message, 'var(--red)'); return; }
+  const d = normaliseReview(current);
+  const wb = newWorkbook(ExcelJS);
+  writeReviewSheet(wb.addWorksheet(d.mode, {properties:{tabColor:{argb:XL.brand}}}), d);
+  await downloadWorkbook(wb, `${d.mode}_${xlFileName(d.period||'review')}_${xlFileName(d.designer||'designer')}.xlsx`);
+}
+
+// Every review in one workbook.
+async function exportAllExcel(){
+  if(!reviews.length){ showToast('There are no reviews to export yet', 'var(--amber)'); return; }
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJS(); } catch(err){ showToast(err.message, 'var(--red)'); return; }
+  showToast(`Building the workbook (${reviews.length} reviews)…`, 'var(--blue)');
+  const list = reviews.map(normaliseReview)
+    .sort((a,b)=>reviewTime(b)-reviewTime(a) || String(a.designer||'').localeCompare(String(b.designer||'')));
+  const wb = newWorkbook(ExcelJS);
+  const SUM = 'Summary';
+  const ws = wb.addWorksheet(SUM, {properties:{tabColor:{argb:XL.brand}}, views:[{state:'frozen', ySplit:3, showGridLines:false}]});
+
+  // A sheet name per review: "Jo Smith Oct 26 QAM" (Excel allows 31 characters).
+  const used = new Set([SUM.toLowerCase()]);
+  const names = list.map(d=>{
+    const p = Date.parse('1 ' + (d.period||''));
+    const when = !isNaN(p) ? new Date(p).toLocaleDateString('en-AU', {month:'short', year:'2-digit'}) : (d.period||'');
+    let base = `${d.designer||'Unnamed'} ${when}${d.mode!=='MAM' ? ' ' + d.mode : ''}`.replace(/[\[\]*?\/\\:']/g,'').trim().slice(0, 31);
+    let name = base, k = 2;
+    while(used.has(name.toLowerCase())){ const suffix = ` (${k++})`; name = base.slice(0, 31 - suffix.length) + suffix; }
+    used.add(name.toLowerCase());
+    return name;
+  });
+
+  const cols = [
+    {h:'Period', w:16}, {h:'Date', w:13}, {h:'Type', w:8}, {h:'Designer', w:22}, {h:'Lead reviewer', w:18},
+    {h:'Goals done', w:11}, {h:'Training signed off', w:11}, {h:'Timesheet', w:11},
+    {h:'Audit /10', w:10}, {h:'Behaviour /10', w:11}, {h:'Overall', w:10}, {h:'Agreed payout', w:20}, {h:'Review', w:12}
+  ];
+  ws.columns = cols.map(c=>({width:c.w}));
+  const base = {name:'Arial', size:10, color:{argb:XL.txt}};
+  ws.mergeCells(1, 1, 1, cols.length);
+  ws.getCell(1, 1).value = `Austruss reviews — ${list.length} review${list.length===1?'':'s'}, exported ${new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'})}`;
+  ws.getCell(1, 1).font = {...base, bold:true, size:14};
+  ws.getRow(1).height = 24;
+  ws.getCell(2, 1).value = 'Use the arrows in the header row to filter by designer, type or period. Click Open to see a review.';
+  ws.getCell(2, 1).font = {...base, italic:true, size:9, color:{argb:XL.muted}};
+  const head = ws.getRow(3);
+  cols.forEach((c,i)=>{
+    const cell = head.getCell(i+1);
+    cell.value = c.h;
+    cell.font = {...base, bold:true, size:9.5};
+    cell.fill = xlFill(XL.head);
+    cell.alignment = {wrapText:true, vertical:'middle', horizontal: i>=5 && i<=10 ? 'center' : 'left'};
+    cell.border = {bottom:xlBorder(XL.grid)};
+  });
+  head.height = 30;
+
+  list.forEach((d, idx)=>{
+    const goals = (d.prevGoals||[]).filter(g=>String(g.goal||'').trim());
+    const training = (d.training||[]).filter(t=>String(t.skill||'').trim());
+    const qam = d.mode==='QAM' || d.mode==='YAM';
+    const aa = qam ? auditAvg(d) : null, ba = qam ? behavAvg(d) : null, ov = qam ? overallScore(d) : null;
+    const row = ws.getRow(idx + 4);
+    [
+      d.period || '', xlDate(d.date) || d.date || '', d.mode, d.designer || '', d.reviewer || '',
+      goals.length ? `${goals.filter(g=>g.status==='Done').length} of ${goals.length}` : '',
+      training.length ? `${training.filter(t=>t.status==='Signed off').length} of ${training.length}` : '',
+      d.timesheet ? d.timesheet.charAt(0).toUpperCase() + d.timesheet.slice(1).toLowerCase() : '',
+      aa!==null ? +scaleTo10(aa).toFixed(1) : '', ba!==null ? +scaleTo10(ba).toFixed(1) : '',
+      ov!==null ? ov/100 : '', d.agreedPayout || '',
+      {text:'Open →', hyperlink:`#'${names[idx]}'!A1`}
+    ].forEach((v, i)=>{ row.getCell(i+1).value = v; });
+    row.eachCell({includeEmpty:true}, (cell, c)=>{
+      cell.font = {...base};
+      cell.alignment = {vertical:'top', wrapText:true, horizontal: c>=6 && c<=11 ? 'center' : 'left'};
+      cell.border = {bottom:xlBorder('FFE5E7EB')};
+      if(idx % 2) cell.fill = xlFill('FFF8F9FA');
+    });
+    row.getCell(2).numFmt = 'd mmm yyyy';
+    row.getCell(9).numFmt = '0.0';
+    row.getCell(10).numFmt = '0.0';
+    row.getCell(11).numFmt = '0%';
+    if(ov!==null){
+      const tier = tierFor(ov/10);
+      const [fg, bg] = [[XL.green, XL.greenLt], [XL.blue, XL.blueLt], [XL.amber, XL.amberLt], [XL.red, XL.redLt]][tier];
+      row.getCell(11).fill = xlFill(bg);
+      row.getCell(11).font = {...base, bold:true, color:{argb:fg}};
+    }
+    row.getCell(13).font = {...base, color:{argb:XL.blue}, underline:true};
+  });
+  ws.autoFilter = {from:{row:3, column:1}, to:{row:3 + list.length, column:cols.length}};
+  ws.pageSetup = {paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:0, printTitlesRow:'3:3',
+    margins:{left:0.4, right:0.4, top:0.5, bottom:0.5, header:0.3, footer:0.3}};
+
+  list.forEach((d, idx)=>{
+    const tab = d.mode==='YAM' ? XL.green : d.mode==='QAM' ? XL.purple : undefined;
+    writeReviewSheet(wb.addWorksheet(names[idx], tab ? {properties:{tabColor:{argb:tab}}} : {}), d, {backTo:SUM});
+  });
+
+  await downloadWorkbook(wb, `Austruss_Reviews_${new Date().toISOString().split('T')[0]}.xlsx`);
+  showToast(`Exported ${list.length} reviews to Excel`);
 }
 
 // ── Online database (worker.js) ────────────────────────────────────────────

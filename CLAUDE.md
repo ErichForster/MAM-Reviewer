@@ -23,6 +23,15 @@ database; every reviewer signs in with their name and a 4-digit PIN.
 - `POST /api/import` — adds reviews/templates the database doesn't have; never overwrites
 - `/api/users` (admin), `POST /api/me/pin`
 
+## Excel export
+
+`exportExcel()` (top bar) = the open review as one printable sheet;
+`exportAllExcel()` (sidebar) = a Summary sheet (one row per review, filters,
+"Open →" links) plus one sheet per review. Built in the browser with ExcelJS
+4.4.0, loaded from cdnjs on first use. Internal notes are left out, like the
+PDF and Word exports. Excel doesn't size merged wrapped rows, so `fitRow()`
+estimates row heights from the text.
+
 ## History
 
 Until 2026-10-08 this was a GitHub Pages page that kept reviews in each
