@@ -24454,7 +24454,7 @@ function importJSON(e){
       const incomingTemplates = Array.isArray(data) ? [] : (data.auditTemplates || []);
       const incomingActiveId = Array.isArray(data) ? null : (data.activeTemplateId || null);
       const rCount = incomingReviews.length;
-      const tCount = incomingTemplates.length;
+      const tCount = incomingTemplates.length + (Array.isArray(data) ? 0 : (data.behavTemplates || []).length);
       openDialog('Import backup',
         `Merge ${rCount} review(s) and ${tCount} template(s) from this backup? Existing items with the same ID won't be duplicated.`,
         async ()=>{
