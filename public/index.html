@@ -23332,11 +23332,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         </div>
         <div class="fg">
           <label>Designer</label>
-          <input type="text" id="f-designer" list="dl-designers" placeholder="Name" style="width:110px" oninput="markDirty();onDesignerChange()" autocomplete="off">
+          <select id="f-designer" style="width:150px" onchange="onPersonPick(this,'designer')"></select>
         </div>
         <div class="fg">
           <label>Lead reviewer</label>
-          <input type="text" id="f-reviewer" list="dl-reviewers" placeholder="Name" style="width:110px" oninput="markDirty()" autocomplete="off">
+          <select id="f-reviewer" style="width:150px" onchange="onPersonPick(this,'reviewer')"></select>
         </div>
         <div class="fg">
           <label>Sections</label>
@@ -23435,6 +23435,7 @@ let behavTemplates = [];
 let activeBehavTemplateId = null;
 let savedInfo = {};   // review id → {updated, by}: the server's copy each review was loaded from
 let me = null;        // the signed-in reviewer {id, name, role}
+let team = [];        // [{id, name, active}]: the names Designer / Lead reviewer can be
 let current = null;
 let dirty = false;
 let currentMode = 'MAM';
@@ -23882,6 +23883,8 @@ function doLoad(idx){
 }
 
 function showForm(){
+  const np = document.getElementById('notes-panel');
+  if(np && np.dataset.teamHid){ np.style.display = 'flex'; delete np.dataset.teamHid; }
   // Ensure we're on the reviews tab so history is visible and clickable
   setSidebarView('reviews');
   document.getElementById('topbar').style.display='flex';
@@ -23933,8 +23936,8 @@ function populateTopbar(){
   buildPeriodSelects(mon, yr);
   document.getElementById('f-period').value = period;
   document.getElementById('f-date').value = current.date || '';
-  document.getElementById('f-designer').value = current.designer || '';
-  document.getElementById('f-reviewer').value = current.reviewer || '';
+  fillPersonSelect(document.getElementById('f-designer'), current.designer || '');
+  fillPersonSelect(document.getElementById('f-reviewer'), current.reviewer || '');
   ['MAM','QAM','YAM'].forEach(m => document.getElementById('btn-'+m.toLowerCase()).classList.remove('active'));
   document.getElementById('btn-mam').classList.add('active');
   if(currentMode==='QAM'||currentMode==='YAM') document.getElementById('btn-qam').classList.add('active');
@@ -25408,6 +25411,276 @@ async function exportAllExcel(){
   showToast(`Exported ${list.length} reviews to Excel`);
 }
 
+// ── Team members ───────────────────────────────────────────────────────────
+// Designer and Lead reviewer are picked from the team list (worker.js `team`),
+// so a name has to be added once before it can be used and can't be mistyped.
+// The Team page (Account tab) lists everyone; admins can rename, hide and
+// merge, and "Tidy up names" merges the spellings already in old reviews.
+const personNorm = v => String(v||'').trim().replace(/\s+/g,' ').toLowerCase();
+const ADD_PERSON = '__add__';
+
+function fillPersonSelect(sel, value){
+  const names = team.filter(m=>m.active).map(m=>m.name);
+  const known = team.some(m=>m.name===value);
+  let html = `<option value="">— pick —</option>`;
+  if(value && !known) html += `<option value="${esc(value)}">${esc(value)} (not in team list)</option>`;
+  html += names.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  // Hidden team members still show on the reviews that already have them.
+  if(value && known && !names.includes(value)) html += `<option value="${esc(value)}">${esc(value)} (hidden)</option>`;
+  html += `<option value="${ADD_PERSON}">+ Add team member…</option>`;
+  sel.innerHTML = html;
+  sel.value = value || '';
+  sel.dataset.prev = sel.value;
+}
+
+async function onPersonPick(sel, field){
+  if(sel.value === ADD_PERSON){
+    const name = (prompt('New team member’s full name (as it should appear on reviews):') || '').trim();
+    if(!name){ sel.value = sel.dataset.prev || ''; return; }
+    try{
+      const res = await api('POST', '/api/team', {name});
+      team = res.team;
+      const added = team.find(m=>personNorm(m.name)===personNorm(name));
+      fillPersonSelect(sel, added ? added.name : name);
+      showToast(`${added ? added.name : name} added to the team list`);
+    } catch(err){
+      showToast(err.message, 'var(--red)');
+      // Already there under another spelling: pick that one.
+      const same = team.find(m=>personNorm(m.name)===personNorm(name));
+      sel.value = same ? same.name : (sel.dataset.prev || '');
+      if(!same) return;
+    }
+  }
+  sel.dataset.prev = sel.value;
+  markDirty();
+  if(field==='designer') onDesignerChange();
+}
+
+// ── Team page ──────────────────────────────────────────────────────────────
+function openTeamPage(){
+  if(dirty){
+    openDialog('Unsaved changes', 'Save the current review before opening the team list?',
+      ()=>{ saveReview().then(ok=>{ if(ok) showTeamPage(); }); },
+      ()=>{ dirty = false; showTeamPage(); });
+    return;
+  }
+  showTeamPage();
+}
+
+// How often each exact spelling is used, as designer and as lead reviewer.
+function nameUsage(){
+  const use = new Map();
+  reviews.forEach(r=>{
+    [['designer','asDesigner'], ['reviewer','asReviewer']].forEach(([k, slot])=>{
+      const v = r[k];
+      if(!v || !String(v).trim()) return;
+      if(!use.has(v)) use.set(v, {name:v, asDesigner:0, asReviewer:0, periods:new Set()});
+      const u = use.get(v);
+      u[slot]++;
+      if(r.period) u.periods.add(r.period);
+    });
+  });
+  return [...use.values()];
+}
+
+function levenshtein(a, b){
+  const d = Array.from({length:a.length+1}, (_,i)=>[i]);
+  for(let j=1; j<=b.length; j++) d[0][j] = j;
+  for(let i=1; i<=a.length; i++) for(let j=1; j<=b.length; j++)
+    d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1] + (a[i-1]===b[j-1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+// Who a spelling most likely is: {to} when there's one clear match, {maybe:[…]}
+// when there are several, {} when none. `cands` = full names to match against;
+// `weight` = how established a name is (team members highest), so two
+// near-identical spellings point the same way instead of at each other.
+function suggestPerson(raw, cands, weight){
+  const n = personNorm(raw);
+  const others = cands.filter(c=>personNorm(c)!==n || c!==raw);
+  const same = others.find(c=>personNorm(c)===n);
+  if(same) return {to:same};
+  const toks = n.split(' ');
+  const full = others.filter(c=>personNorm(c).includes(' ') && personNorm(c)!==n);
+  let hits;
+  if(toks.length===1){
+    const t = toks[0];
+    // "Ali" = any part of the name; "Nat", "Mitch" = the start of the first name.
+    hits = full.filter(c=>{
+      const ct = personNorm(c).split(' ');
+      return ct.includes(t) || (t.length>=3 && ct[0].startsWith(t));
+    });
+  } else {
+    hits = full.filter(c=>{
+      const cn = personNorm(c), ct = cn.split(' ');
+      if(weight(c) < weight(raw) || (weight(c) === weight(raw) && c < raw)) return false;
+      if(levenshtein(n, cn) <= 2) return true;
+      // "Nic G" = Nicholas Geljic: each word starts the matching word.
+      return toks.length===ct.length && toks.every((t,i)=>ct[i].startsWith(t));
+    });
+  }
+  hits = [...new Set(hits)];
+  if(hits.length===1) return {to:hits[0]};
+  if(hits.length>1) return {maybe:hits};
+  return {};
+}
+
+function showTeamPage(){
+  current = null; dirty = false;
+  document.getElementById('topbar').style.display = 'none';
+  // The notes panel belongs to a review: tuck it away here, showForm() brings it back.
+  const np = document.getElementById('notes-panel');
+  if(np && np.style.display!=='none'){ np.dataset.teamHid = '1'; np.style.display = 'none'; }
+  const admin = me && me.role==='admin';
+  const usage = nameUsage();
+  const countFor = name => usage.filter(u=>personNorm(u.name)===personNorm(name))
+    .reduce((s,u)=>({d:s.d+u.asDesigner, r:s.r+u.asReviewer}), {d:0, r:0});
+
+  const members = team.map(m=>{
+    const c = countFor(m.name);
+    const uses = [c.d ? `${c.d} as designer` : '', c.r ? `${c.r} as reviewer` : ''].filter(Boolean).join(' · ') || 'not on any review yet';
+    const nm = esc(m.name).replace(/'/g,'&#39;');
+    return `<tr${m.active ? '' : ' style="opacity:.55"'}>
+      <td style="padding:7px 8px;font-weight:600">${esc(m.name)}${m.active ? '' : ' <span style="font-weight:400;color:var(--txt3)">(hidden)</span>'}</td>
+      <td style="padding:7px 8px;color:var(--txt2)">${uses}</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">${admin ? `
+        <button class="btn-export-json" onclick="renameMember('${m.id}','${nm}')">Rename</button>
+        <button class="btn-export-json" onclick="hideMember('${m.id}',${m.active ? 'false' : 'true'})">${m.active ? 'Hide' : 'Show'}</button>
+        ${c.d || c.r ? '' : `<button class="btn-del" title="Remove" onclick="removeMember('${m.id}','${nm}')">✕</button>`}` : ''}
+      </td></tr>`;
+  }).join('');
+
+  let html = `
+    <div class="section">
+      <div class="sec-hdr"><div style="flex:1"><div class="stitle">Team members</div>
+        <div class="sdesc">The names offered in the Designer and Lead reviewer boxes. Add someone here (or from the box itself) before their first review.</div></div></div>
+      <div class="sec-body">
+        ${team.length ? `<table class="et"><tbody>${members}</tbody></table>` : `<p style="font-size:12px;color:var(--txt2)">Nobody yet.${admin ? ' Use “Tidy up names” below to build the list from the names already on reviews.' : ''}</p>`}
+        <form onsubmit="addMember(event)" style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap">
+          <input id="tm-new" placeholder="Full name" autocomplete="off" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid var(--bdr);border-radius:var(--radius);font-size:13px">
+          <button type="submit" class="btn-save">+ Add</button>
+        </form>
+      </div>
+    </div>`;
+
+  if(admin) html += tidySection(usage);
+  else html += `<p style="font-size:12px;color:var(--txt3)">An admin can rename or merge team members.</p>`;
+  document.getElementById('formBody').innerHTML = html;
+}
+
+// Every spelling on a review that isn't exactly a team member, with a
+// suggested action. Nothing changes until "Apply" is pressed.
+let tidyRows = [];
+function tidySection(usage){
+  const teamNames = team.map(m=>m.name);
+  tidyRows = usage.filter(u=>!teamNames.includes(u.name))
+    .sort((a,b)=>personNorm(a.name).localeCompare(personNorm(b.name)));
+  if(!tidyRows.length){
+    return `<div class="section"><div class="sec-hdr"><div class="stitle">Tidy up names</div></div>
+      <div class="sec-body" style="font-size:12px;color:var(--green)">✓ Every name on every review matches the team list.</div></div>`;
+  }
+  // Possible targets: the team, plus the full (two-word) names on reviews.
+  const fullOnReviews = [...new Set(usage.map(u=>u.name.trim().replace(/\s+/g,' ')).filter(n=>n.includes(' ')))];
+  const cands = [...new Set([...teamNames, ...fullOnReviews])].sort((a,b)=>a.localeCompare(b));
+  const weight = name => teamNames.includes(name) ? 1e9
+    : usage.filter(u=>personNorm(u.name)===personNorm(name)).reduce((s,u)=>s+u.asDesigner+u.asReviewer, 0);
+
+  const rows = tidyRows.map((u, i)=>{
+    const tidy = u.name.trim().replace(/\s+/g,' ');
+    const s = suggestPerson(u.name, cands, weight);
+    // Default: the one clear match; nothing when it could be several people;
+    // otherwise keep the name and add it to the team.
+    const pick = s.to ? 'to:' + s.to : s.maybe ? '' : 'add';
+    const note = s.maybe ? `<div style="font-size:11px;color:var(--amber)">Could be ${s.maybe.map(esc).join(' or ')} — check the periods</div>`
+      : tidy!==u.name ? `<div style="font-size:11px;color:var(--txt3)">has extra spaces</div>` : '';
+    const opts = [`<option value="">Leave for now</option>`,
+      `<option value="add"${pick==='add'?' selected':''}>Keep as “${esc(tidy)}” and add to the team</option>`,
+      ...cands.filter(c=>c!==u.name).map(c=>`<option value="to:${esc(c)}"${pick==='to:'+c?' selected':''}>Same person as ${esc(c)}</option>`)].join('');
+    const used = [u.asDesigner ? `${u.asDesigner} as designer` : '', u.asReviewer ? `${u.asReviewer} as reviewer` : ''].filter(Boolean).join(' · ');
+    return `<tr>
+      <td style="padding:7px 8px"><span style="font-weight:600;white-space:pre">“${esc(u.name)}”</span>${note}</td>
+      <td style="padding:7px 8px;color:var(--txt2);font-size:11px">${used}<div style="color:var(--txt3)">${[...u.periods].slice(0,4).map(esc).join(', ')}${u.periods.size>4?'…':''}</div></td>
+      <td style="padding:4px 6px;min-width:220px"><select data-tidy="${i}" style="border:1px solid var(--bdr)">${opts}</select></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="section">
+    <div class="sec-hdr"><div style="flex:1"><div class="stitle">Tidy up names</div>
+      <div class="sdesc">Names on reviews that aren't in the team list yet. Check each suggestion, then Apply — the reviews are updated for everyone.</div></div></div>
+    <div class="sec-body">
+      <table class="et"><thead><tr><th>Name on reviews</th><th>Used on</th><th>What to do</th></tr></thead><tbody>${rows}</tbody></table>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+        <button class="btn-save" onclick="applyTidy()">Apply</button>
+      </div>
+    </div></div>`;
+}
+
+async function applyTidy(){
+  // Row choice → final name (following "same as X" when X is itself being merged).
+  const choice = new Map();
+  document.querySelectorAll('[data-tidy]').forEach(sel=>{
+    const u = tidyRows[+sel.dataset.tidy];
+    if(sel.value==='add') choice.set(u.name, u.name.trim().replace(/\s+/g,' '));
+    else if(sel.value.startsWith('to:')) choice.set(u.name, sel.value.slice(3));
+  });
+  if(!choice.size){ showToast('Nothing chosen yet', 'var(--amber)'); return; }
+  const final = name=>{ let n = name, hops = 0; while(choice.has(n) && choice.get(n)!==n && hops++<10) n = choice.get(n); return choice.get(n) || n; };
+  const groups = new Map();
+  for(const from of choice.keys()){
+    const to = final(from);
+    if(!groups.has(to)) groups.set(to, []);
+    groups.get(to).push(from);
+  }
+  const affected = reviews.filter(r=>[r.designer, r.reviewer].some(v=>choice.has(v))).length;
+  const merged = [...choice.keys()].filter(f=>final(f).trim()!==f.trim()).length;
+  openDialog('Tidy up names',
+    `Merge ${merged} spelling(s) and set up ${groups.size} team member(s). ${affected} review(s) will be updated for everyone. Go ahead?`,
+    async ()=>{
+      let changed = 0;
+      try{
+        for(const [to, from] of groups){
+          const res = await api('POST', '/api/team/merge', {from, to});
+          changed += res.changed; team = res.team;
+        }
+      } catch(err){ showToast('Stopped: ' + err.message, 'var(--red)'); }
+      await loadData();
+      showTeamPage();
+      showToast(`Names tidied — ${changed} review(s) updated`);
+    });
+}
+
+async function addMember(e){
+  e.preventDefault();
+  const inp = document.getElementById('tm-new');
+  try{
+    const res = await api('POST', '/api/team', {name: inp.value});
+    team = res.team; showTeamPage();
+    showToast('Added to the team list');
+  } catch(err){ showToast(err.message, 'var(--red)'); }
+}
+
+async function renameMember(id, name){
+  const next = (prompt(`Rename ${name} to:`, name) || '').trim();
+  if(!next || next===name) return;
+  try{
+    const res = await api('PATCH', '/api/team/' + id, {name: next});
+    await loadData(); showTeamPage();
+    showToast(`Renamed — ${res.renamed} review(s) updated`);
+  } catch(err){ showToast(err.message, 'var(--red)'); }
+}
+
+async function hideMember(id, active){
+  try{ const res = await api('PATCH', '/api/team/' + id, {active}); team = res.team; showTeamPage(); }
+  catch(err){ showToast(err.message, 'var(--red)'); }
+}
+
+function removeMember(id, name){
+  openDialog('Remove team member', `Remove ${name} from the team list?`, async ()=>{
+    try{ const res = await api('DELETE', '/api/team/' + id); team = res.team; showTeamPage(); }
+    catch(err){ showToast(err.message, 'var(--red)'); }
+  });
+}
+
 // ── Online database (worker.js) ────────────────────────────────────────────
 // Every reviewer signs in with their name and a 4-digit PIN. The first person
 // to open a fresh database becomes its admin and adds everyone else in the
@@ -25436,6 +25709,7 @@ async function loadData(){
   activeTemplateId = d.activeTemplateId || null;
   behavTemplates = d.behavTemplates || [];
   activeBehavTemplateId = d.activeBehavTemplateId || null;
+  team = d.team || [];
   refreshDataLists();
   renderHistory();
   if(sidebarView==='template') renderTemplatePanel();
@@ -25543,6 +25817,9 @@ function renderSettingsPanel(){
     <div style="${SB_H};margin-top:0">You</div>
     <div style="font-size:12px;color:#CBD5E1;margin-bottom:8px">${esc(me.name)} <span style="color:#6B8099">· ${me.role==='admin'?'admin':'reviewer'}</span></div>
     <button onclick="signOut()" style="${SB_BTN}">Sign out</button>
+
+    <div style="${SB_H}">Team</div>
+    <button onclick="openTeamPage()" style="${SB_BTN}">Team members${me.role==='admin' ? ' & tidy up names' : ''}</button>
 
     <div style="${SB_H}">Change your PIN</div>
     <form onsubmit="changePin(event)" style="display:flex;flex-direction:column;gap:6px">

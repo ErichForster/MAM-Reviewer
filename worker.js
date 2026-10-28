@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, data TEXT NOT NULL, cre
   updated INTEGER, updated_by TEXT);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS activity (at INTEGER, who TEXT, what TEXT);
+CREATE TABLE IF NOT EXISTS team (id TEXT PRIMARY KEY, name TEXT NOT NULL, active INTEGER DEFAULT 1,
+  created INTEGER, created_by TEXT);
 `;
 
 class Oops extends Error {
@@ -65,6 +67,14 @@ function sameText(a, b) {
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return d === 0;
 }
+// Names are compared the way people mistype them: case and extra spaces don't count.
+const norm = (v) => String(v ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+const memberName = (v) => {
+  const name = str(v, 60).replace(/\s+/g, " ");
+  if (name.length < 2) fail(400, "Give the team member a name.");
+  return name;
+};
+
 // Review ids are whatever the page made (Date.now() numbers, or strings from
 // the old Sheet), so they're compared as text.
 const reviewId = (v) => {
@@ -119,6 +129,42 @@ export class Reviews extends DurableObject {
     const admin = () => user.role === "admin" || fail(403, "Only an admin can do that.");
 
     if (what === "data" && method === "GET") return this.data();
+
+    // The team list: the only names the Designer and Lead reviewer boxes offer.
+    // Anyone can add a person; renaming, hiding and merging are for admins.
+    if (what === "team" && !id && method === "POST") {
+      const name = this.checkMember(body.name);
+      this.run("INSERT INTO team (id, name, active, created, created_by) VALUES (?, ?, 1, ?, ?)", rid(), name, Date.now(), user.name);
+      this.log(user, `added ${name} to the team list`);
+      return { team: this.team() };
+    }
+    if (what === "team" && id === "merge" && method === "POST") { admin(); return this.merge(user, body); }
+    if (what === "team" && id && method === "PATCH") {
+      admin();
+      const m = this.one("SELECT * FROM team WHERE id = ?", id) || fail(404, "That team member was removed.");
+      let renamed = 0;
+      if (body.name !== undefined && memberName(body.name) !== m.name) {
+        const name = this.checkMember(body.name, id);
+        this.run("UPDATE team SET name = ? WHERE id = ?", name, id);
+        renamed = this.renameInReviews(user, [m.name], name);
+        this.log(user, `renamed ${m.name} to ${name} (${renamed} review(s) updated)`);
+      }
+      if (body.active !== undefined) {
+        this.run("UPDATE team SET active = ? WHERE id = ?", body.active ? 1 : 0, id);
+        this.log(user, `${body.active ? "showed" : "hid"} ${m.name} in the team list`);
+      }
+      return { team: this.team(), renamed };
+    }
+    if (what === "team" && id && method === "DELETE") {
+      admin();
+      const m = this.one("SELECT * FROM team WHERE id = ?", id) || fail(404, "That team member was removed.");
+      const used = this.all("SELECT data FROM reviews").map((r) => parse(r.data, {}))
+        .filter((r) => norm(r.designer) === norm(m.name) || norm(r.reviewer) === norm(m.name)).length;
+      if (used) fail(400, `${m.name} is on ${used} review(s). Hide them instead, or merge them into someone else.`);
+      this.run("DELETE FROM team WHERE id = ?", id);
+      this.log(user, `removed ${m.name} from the team list`);
+      return { team: this.team() };
+    }
 
     if (what === "reviews" && id && method === "PUT") return this.putReview(user, reviewId(id), body);
     if (what === "reviews" && id && method === "DELETE") {
@@ -232,7 +278,61 @@ export class Reviews extends DurableObject {
       activeTemplateId: t.activeTemplateId || null,
       behavTemplates: t.behavTemplates || [],
       activeBehavTemplateId: t.activeBehavTemplateId || null,
+      team: this.team(),
     };
+  }
+
+  team() {
+    return this.all("SELECT id, name, active FROM team ORDER BY lower(name)").map((m) => ({ ...m, active: !!m.active }));
+  }
+
+  checkMember(v, selfId = "") {
+    const name = memberName(v);
+    const clash = this.all("SELECT id, name FROM team WHERE id != ?", selfId).find((m) => norm(m.name) === norm(name));
+    if (clash) fail(400, `${clash.name} is already in the team list.`);
+    return name;
+  }
+
+  // Every review whose Designer or Lead reviewer is one of `from` (or a
+  // differently-spaced/cased `to`) gets `to` instead. Saved as a change by
+  // `user`, so a copy someone has open gets the "saved by someone else" check.
+  renameInReviews(user, from, to) {
+    const olds = new Set([...from, to].map(norm));
+    const now = Date.now();
+    let n = 0;
+    for (const row of this.all("SELECT id, data FROM reviews")) {
+      const r = parse(row.data, null);
+      if (!r) continue;
+      let changed = false;
+      for (const k of ["designer", "reviewer"]) {
+        if (r[k] && olds.has(norm(r[k])) && r[k] !== to) { r[k] = to; changed = true; }
+      }
+      if (!changed) continue;
+      this.run("UPDATE reviews SET data = ?, updated = ?, updated_by = ? WHERE id = ?", JSON.stringify(r), now, user.name, row.id);
+      n++;
+    }
+    return n;
+  }
+
+  // Merge names used in reviews into one team member, adding them to the
+  // team list if they aren't there yet.
+  merge(user, body) {
+    const to = memberName(body.to);
+    const from = (Array.isArray(body.from) ? body.from : []).map((v) => String(v ?? "")).filter((v) => v.trim());
+    if (!from.length) fail(400, "Pick the names to merge.");
+    let m = this.all("SELECT * FROM team").find((x) => norm(x.name) === norm(to));
+    if (!m) {
+      this.run("INSERT INTO team (id, name, active, created, created_by) VALUES (?, ?, 1, ?, ?)", rid(), to, Date.now(), user.name);
+    } else if (m.name !== to) {
+      fail(400, `The team list spells it ${m.name}. Merge into that name.`);
+    }
+    // Team members whose name is being merged away go too.
+    for (const x of this.all("SELECT * FROM team")) {
+      if (norm(x.name) !== norm(to) && from.some((f) => norm(f) === norm(x.name))) this.run("DELETE FROM team WHERE id = ?", x.id);
+    }
+    const changed = this.renameInReviews(user, from, to);
+    this.log(user, `merged ${from.map((f) => `“${f.trim()}”`).join(", ")} into ${to} (${changed} review(s) updated)`);
+    return { team: this.team(), changed };
   }
 
   putReview(user, id, body) {

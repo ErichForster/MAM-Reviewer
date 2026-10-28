@@ -22,6 +22,20 @@ database; every reviewer signs in with their name and a 4-digit PIN.
 - `DELETE /api/reviews/:id`, `PUT /api/templates`
 - `POST /api/import` — adds reviews/templates the database doesn't have; never overwrites
 - `/api/users` (admin), `POST /api/me/pin`
+- `POST /api/team` (anyone), `PATCH|DELETE /api/team/:id`, `POST /api/team/merge` (admins)
+
+## Team list (2026-10-29)
+
+Designer and Lead reviewer are `<select>`s filled from the `team` table
+(`fillPersonSelect()`), so a person is added once (Team page, or "+ Add team
+member…" in the box) and can't be mistyped. Reviews still store the name as a
+plain string — no change to the review shape. Account tab → Team members
+opens the page: anyone can add; admins rename (renames the name on every
+review), hide, remove (only if unused) and "Tidy up names", which lists every
+spelling on reviews that isn't a team member, suggests who it is
+(`suggestPerson()`), and on Apply calls `POST /api/team/merge {from, to}` per
+person. Merges and renames save the touched reviews as changed by the admin,
+so a copy open elsewhere gets the usual 409 check.
 
 ## Excel export
 
