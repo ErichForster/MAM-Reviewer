@@ -23205,6 +23205,15 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-export-pdf:hover{background:var(--red);color:#fff}
 .btn-export-xlsx{padding:6px 12px;background:var(--green-bg);color:var(--green);border:1px solid var(--green-bdr);border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer}
 .btn-export-xlsx:hover{background:var(--green);color:#fff}
+.rpt-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.rpt-chip{padding:5px 11px;border:1px solid var(--bdr);border-radius:999px;background:var(--bg3);color:var(--txt2);font-size:12px;cursor:pointer}
+.rpt-chip:hover{border-color:var(--brand);color:var(--txt)}
+.rpt-chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+.rpt-range{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--txt2)}
+.rpt-range select{font-size:12px;padding:4px 5px;border:1px solid var(--bdr);border-radius:var(--radius);background:var(--bg3);color:var(--txt)}
+.rpt-tbl td{padding:6px 8px;font-size:12px;color:var(--txt)}
+.rpt-note{font-size:12px;color:var(--txt2);margin-top:8px}
+.rpt-btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 .btn-del{padding:6px 10px;background:none;color:var(--txt3);border:1px solid var(--bdr);border-radius:var(--radius);font-size:12px;cursor:pointer}
 .btn-del:hover{color:var(--red);border-color:var(--red)}
 .form-body{flex:1;overflow-y:auto;min-height:0;padding:18px}
@@ -23302,6 +23311,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
         <button class="btn-sb-sm" onclick="triggerImportJSON()" title="Import backup">↑ Import</button>
         <button class="btn-sb-sm" onclick="exportAllExcel()" title="Every review in one Excel workbook, with a summary sheet">↓ Excel</button>
       </div>
+      <button class="btn-sb-sm" onclick="openReportsPage()" title="Bonus payouts, a month of reviews as one PDF, recognition by person" style="width:100%;margin-top:5px">Reports — payouts · PDFs · recognition</button>
       <input type="file" id="importInput" accept=".json" style="display:none" onchange="importJSON(event)">
     </div>
     <div class="sb-tabs">
@@ -24482,6 +24492,12 @@ function importJSON(e){
 function exportPDF(){
   collectForm();
   const d = current;
+  const fname = `${d.mode}_${(d.period||'review').replace(/\s+/g,'_')}_${(d.designer||'designer').replace(/\s+/g,'_')}`;
+  printDoc(fname, pdfReviewBody(d));
+}
+
+// One review as print-ready HTML (the ↓ PDF button and the month's bulk PDF).
+function pdfReviewBody(d){
   const qam = d.mode==='QAM'||d.mode==='YAM';
   const GRADE_LABELS = ['','Needs guidance','Building understanding','Competent','Confident','Highly proficient'];
   const BEHAV = {dep:'Dependability / Punctuality',resp:'Respect for everyone & everything',speaks:'Speaks up (ask questions)',comm:'Communication (verbal/written)',prob:'Problem solving'};
@@ -24573,11 +24589,11 @@ function exportPDF(){
       </ul></div>
     </div>`;
 
-  const fname = `${d.mode}_${(d.period||'review').replace(/\s+/g,'_')}_${(d.designer||'designer').replace(/\s+/g,'_')}`;
-  const win = window.open('','_blank');
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
-  <title>${fname}</title>
-  <style>
+  return body;
+}
+
+// The print page the PDF exports share; the browser's print dialog saves it as a PDF.
+const PDF_CSS = `
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:Arial,sans-serif;font-size:11pt;color:#1a1917;padding:20mm 18mm;max-width:100%}
     .doc-title{font-size:16pt;font-weight:700;margin-bottom:8px;color:#1a1917}
@@ -24594,8 +24610,14 @@ function exportPDF(){
     ul{padding-left:18px;margin-bottom:8px;font-size:10.5pt}
     li{margin-bottom:3px}
     .ref-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
-    @media print{body{padding:12mm 12mm}@page{margin:12mm}}
-  </style>
+    @media print{body{padding:12mm 12mm}@page{margin:12mm}}`;
+
+function printDoc(title, body, css){
+  const win = window.open('','_blank');
+  if(!win){ showToast('Allow pop-ups for this site to save PDFs', 'var(--amber)'); return; }
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+  <title>${esc(title)}</title>
+  <style>${PDF_CSS}${css||''}</style>
   </head><body>${body}</body></html>`);
   win.document.close();
   setTimeout(()=>win.print(), 400);
@@ -25411,6 +25433,420 @@ async function exportAllExcel(){
   showToast(`Exported ${list.length} reviews to Excel`);
 }
 
+// ── Reports ────────────────────────────────────────────────────────────────
+// Sidebar "Reports" page: exports across many reviews for a run of months —
+// QAM bonus payouts for accounts, every review as one PDF, and recognition
+// grouped by person. A review counts in the month of its Period
+// ("October 2026"), else its date.
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let rptFrom = null, rptTo = null, rptPreset = null;   // month keys (year*12 + month); null = open-ended
+
+function monthKey(r){
+  const p = Date.parse('1 ' + (r.period||''));
+  if(!isNaN(p)){ const d = new Date(p); return d.getFullYear()*12 + d.getMonth(); }
+  const d = xlDate(r.date);
+  return d ? d.getUTCFullYear()*12 + d.getUTCMonth() : null;
+}
+const keyLabel = k => `${MONTH_NAMES[k%12]} ${Math.floor(k/12)}`;
+const keyShort = k => `${MONTH_NAMES[k%12].slice(0,3)} ${Math.floor(k/12)}`;
+function rangeLabel(){
+  if(rptFrom===null && rptTo===null) return 'All time';
+  if(rptFrom===rptTo) return keyLabel(rptFrom);
+  return `${keyShort(rptFrom)} – ${keyShort(rptTo)}`;
+}
+function inRange(r){
+  if(rptFrom===null && rptTo===null) return true;
+  const k = monthKey(r);
+  return k!==null && k>=rptFrom && k<=rptTo;
+}
+function reportList(){ return reviews.map(normaliseReview).filter(inRange); }
+const reportDay = () => new Date().toLocaleDateString('en-AU', {day:'numeric', month:'short', year:'numeric'});
+
+function setRange(which){
+  const now = new Date(), k = now.getFullYear()*12 + now.getMonth();
+  const q = k - (k % 3);   // first month of this quarter (Jan, Apr, Jul, Oct)
+  ({
+    month: ()=>{ rptFrom = rptTo = k; },
+    lastMonth: ()=>{ rptFrom = rptTo = k - 1; },
+    quarter: ()=>{ rptFrom = q; rptTo = q + 2; },
+    lastQuarter: ()=>{ rptFrom = q - 3; rptTo = q - 1; },
+    year: ()=>{ rptFrom = k - now.getMonth(); rptTo = rptFrom + 11; },
+    all: ()=>{ rptFrom = rptTo = null; }
+  })[which]();
+  rptPreset = which;
+  showReportsPage();
+}
+function pickRange(){
+  const v = id => +document.getElementById(id).value;
+  let a = v('rpt-fy')*12 + v('rpt-fm'), b = v('rpt-ty')*12 + v('rpt-tm');
+  if(a > b) [a, b] = [b, a];
+  rptFrom = a; rptTo = b; rptPreset = null;
+  showReportsPage();
+}
+
+function openReportsPage(){
+  if(dirty){
+    openDialog('Unsaved changes', 'Save the current review before opening reports?',
+      ()=>{ saveReview().then(ok=>{ if(ok) showReportsPage(); }); },
+      ()=>{ dirty = false; showReportsPage(); });
+    return;
+  }
+  showReportsPage();
+}
+
+// Leave the open review for a whole-page view (Team, Reports).
+function clearForPage(){
+  current = null; dirty = false;
+  document.getElementById('topbar').style.display = 'none';
+  // The notes panel belongs to a review: tuck it away here, showForm() brings it back.
+  const np = document.getElementById('notes-panel');
+  if(np && np.style.display!=='none'){ np.dataset.teamHid = '1'; np.style.display = 'none'; }
+}
+
+function showReportsPage(){
+  if(!rptPreset && rptFrom===null && rptTo===null) return setRange('month');
+  clearForPage();
+  const list = reportList();
+  const pays = payoutRows(list);
+  const recs = recognitionGroups(list);
+  const label = esc(rangeLabel());
+
+  // Month pickers: every year with a review, plus this one.
+  const keys = reviews.map(monthKey).filter(k=>k!==null);
+  const thisYear = new Date().getFullYear();
+  const y0 = Math.min(thisYear, ...keys.map(k=>Math.floor(k/12)));
+  const y1 = Math.max(thisYear, ...keys.map(k=>Math.floor(k/12)));
+  const from = rptFrom ?? (keys.length ? Math.min(...keys) : thisYear*12);
+  const to = rptTo ?? (keys.length ? Math.max(...keys) : thisYear*12 + 11);
+  const mSel = (id, k) => `<select id="${id}" onchange="pickRange()">${MONTH_NAMES.map((m,i)=>`<option value="${i}"${i===k%12?' selected':''}>${m}</option>`).join('')}</select>`;
+  const ySel = (id, k) => `<select id="${id}" onchange="pickRange()">${Array.from({length:y1-y0+1}, (_,i)=>y0+i).map(y=>`<option${y===Math.floor(k/12)?' selected':''}>${y}</option>`).join('')}</select>`;
+  const chip = (which, text) => `<button class="rpt-chip${rptPreset===which?' on':''}" onclick="setRange('${which}')">${text}</button>`;
+
+  const counts = ['MAM','QAM','YAM'].map(m=>[m, list.filter(d=>d.mode===m).length]).filter(([,n])=>n).map(([m,n])=>`${n} ${m}`).join(' · ');
+  const missing = pays.filter(p=>!p.payout).length;
+  const recTotal = recs.reduce((s,g)=>s + g.items.length, 0);
+
+  document.getElementById('formBody').innerHTML = `
+    <div class="section">
+      <div class="sec-hdr"><div style="flex:1"><div class="stitle">Reports</div>
+        <div class="sdesc">Pick the months, then export. A review counts in the month of its Period.</div></div></div>
+      <div class="sec-body">
+        <div class="rpt-chips">
+          ${chip('month','This month')}${chip('lastMonth','Last month')}${chip('quarter','This quarter')}${chip('lastQuarter','Last quarter')}${chip('year','This year')}${chip('all','All time')}
+        </div>
+        <div class="rpt-range">From ${mSel('rpt-fm', from)}${ySel('rpt-fy', from)} to ${mSel('rpt-tm', to)}${ySel('rpt-ty', to)}</div>
+      </div>
+    </div>
+
+    <div class="section qam-sec">
+      <div class="sec-hdr qam-hdr"><div style="flex:1"><div class="stitle">QAM bonus payouts</div>
+        <div class="sdesc">For accounts: every QAM and YAM in ${label}, with its scores and agreed payout, and lines to sign.</div></div>
+        <span class="mode-tag tag-qam">QAM</span></div>
+      <div class="sec-body">
+        ${pays.length ? `<table class="et rpt-tbl"><thead><tr><th>Designer</th><th>Period</th><th style="text-align:center">Overall</th><th>Agreed payout</th></tr></thead><tbody>
+          ${pays.map(p=>`<tr><td>${esc(p.d.designer||'—')}</td><td>${esc(p.d.period||'')} ${p.d.mode}</td>
+            <td style="text-align:center">${p.ov!==null ? p.ov.toFixed(0)+'%' : '—'}</td>
+            <td>${p.payout ? esc(p.payout) : '<span style="color:var(--amber)">not entered</span>'}</td></tr>`).join('')}
+          </tbody></table>
+          ${pays.some(p=>p.amount!==null) ? `<p class="rpt-note">Total of the dollar amounts: <strong style="color:var(--txt)">${money(pays.reduce((s,p)=>s + (p.amount||0), 0))}</strong></p>` : ''}
+          ${missing ? `<p class="rpt-note" style="color:var(--amber)">${missing} review${missing===1?' has':'s have'} no agreed payout yet — open ${missing===1?'it':'them'} and fill in section 7 first.</p>` : ''}
+          <div class="rpt-btns"><button class="btn-export-pdf" onclick="exportPayoutPDF()">↓ PDF</button><button class="btn-export-xlsx" onclick="exportPayoutExcel()">↓ Excel</button></div>`
+        : `<p class="rpt-note">No QAM or YAM reviews in ${label}.</p>`}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-hdr"><div style="flex:1"><div class="stitle">All reviews as one PDF</div>
+        <div class="sdesc">Every review in ${label}, each starting on a new page, with a contents page first. Choose “Save as PDF” in the print window.</div></div></div>
+      <div class="sec-body">
+        ${list.length ? `<p class="rpt-note">${list.length} review${list.length===1?'':'s'}: ${counts}.</p>
+          <div class="rpt-btns"><button class="btn-export-pdf" onclick="exportReviewsPDF()">↓ PDF of all ${list.length}</button></div>`
+        : `<p class="rpt-note">No reviews in ${label}.</p>`}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-hdr"><div style="flex:1"><div class="stitle">Recognition</div>
+        <div class="sdesc">Everyone recognised in ${label}, grouped by person. Names are matched to the team list where it's clear who they are.</div></div></div>
+      <div class="sec-body">
+        ${recs.length ? `<table class="et rpt-tbl"><thead><tr><th>Person</th><th style="text-align:center;width:110px">Recognitions</th><th>Latest</th></tr></thead><tbody>
+          ${[...recs].sort((a,b)=>b.items.length-a.items.length || a.name.localeCompare(b.name)).map(g=>`<tr><td>${esc(g.name)}</td><td style="text-align:center">${g.items.length}</td><td>${esc(g.items[0].period||'')}</td></tr>`).join('')}
+          </tbody></table>
+          <div class="rpt-btns"><button class="btn-export-pdf" onclick="exportRecognitionPDF()">↓ PDF</button><button class="btn-export-xlsx" onclick="exportRecognitionExcel()">↓ Excel</button></div>`
+        : `<p class="rpt-note">No recognition entered in ${label}.</p>`}
+        ${recTotal ? `<p class="rpt-note">${recTotal} recognition${recTotal===1?'':'s'} for ${recs.length} ${recs.length===1?'person':'people'}.</p>` : ''}
+      </div>
+    </div>`;
+}
+
+// ── QAM bonus payouts ──
+// "Agreed payout" is free text ("75% bonus", "$1,500"); a dollar figure is
+// also pulled out as a number so the Excel sheet can total it.
+function payoutAmount(s){
+  s = String(s||'');
+  const m = /\$\s*([\d,]+(?:\.\d+)?)/.exec(s) || /^\s*([\d,]+(?:\.\d+)?)\s*$/.exec(s);
+  return m ? parseFloat(m[1].replace(/,/g,'')) : null;
+}
+function payoutRows(list){
+  // A QAM with neither a designer nor a payout is an unfinished draft: leave it off.
+  return list.filter(d=>(d.mode==='QAM' || d.mode==='YAM') && (d.designer || String(d.agreedPayout||'').trim())).map(d=>{
+    const aa = auditAvg(d), ba = behavAvg(d);
+    return {d, aa: aa===null ? null : scaleTo10(aa), ba: ba===null ? null : scaleTo10(ba), ov: overallScore(d),
+      payout: String(d.agreedPayout||'').trim(), amount: payoutAmount(d.agreedPayout)};
+  }).sort((a,b)=>a.d.designer.localeCompare(b.d.designer) || (monthKey(a.d)||0)-(monthKey(b.d)||0));
+}
+const money = n => n.toLocaleString('en-AU', {style:'currency', currency:'AUD'});
+
+function exportPayoutPDF(){
+  const rows = payoutRows(reportList());
+  if(!rows.length){ showToast('No QAM reviews in those months', 'var(--amber)'); return; }
+  const amounts = rows.filter(r=>r.amount!==null);
+  const missing = rows.filter(r=>!r.payout).length;
+  const n = v => v===null ? '—' : v.toFixed(1);
+  const body = `
+    <div class="doc-title">QAM bonus payouts — ${esc(rangeLabel())}</div>
+    <div class="meta-row">
+      <span><strong>Prepared by:</strong> ${esc(me ? me.name : '')}</span>
+      <span><strong>Prepared:</strong> ${reportDay()}</span>
+      <span><strong>Reviews:</strong> ${rows.length}</span>
+    </div>
+    <table><thead><tr><th>Designer</th><th>Review</th><th>Review date</th><th>Lead reviewer</th>
+      <th class="c">Audit /10</th><th class="c">Behaviour /10</th><th class="c">Overall</th><th style="width:22%">Agreed payout</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td><strong>${esc(r.d.designer||'—')}</strong></td><td>${r.d.mode} · ${esc(r.d.period||'')}</td>
+      <td>${esc(niceDate(r.d.date))}</td><td>${esc(r.d.reviewer||'')}</td>
+      <td class="c">${n(r.aa)}</td><td class="c">${n(r.ba)}</td><td class="c"><strong>${r.ov===null ? '—' : r.ov.toFixed(0)+'%'}</strong></td>
+      <td>${r.payout ? `<strong>${esc(r.payout)}</strong>` : '<span style="color:#854F0B">Not entered</span>'}</td></tr>`).join('')}</tbody>
+    ${amounts.length ? `<tfoot><tr><td colspan="7" style="text-align:right"><strong>Total${amounts.length<rows.length ? ' of the dollar amounts' : ''}</strong></td>
+      <td><strong>${money(amounts.reduce((s,r)=>s + r.amount, 0))}</strong></td></tr></tfoot>` : ''}
+    </table>
+    ${missing ? `<p class="note">${missing} review${missing===1?' has':'s have'} no agreed payout entered.</p>` : ''}
+    <p class="note">Audit and behaviour are averages out of 10; overall is the average of the two as a percentage. Payouts are as agreed in each review.</p>
+    <div class="signoff">
+      <div><span>Approved by</span></div><div><span>Signature</span></div><div><span>Date</span></div>
+      <div><span>Processed by (accounts)</span></div><div><span>Signature</span></div><div><span>Date</span></div>
+    </div>`;
+  printDoc(`QAM_Payouts_${xlFileName(rangeLabel())}`, body, `
+    @page{size:A4 landscape}
+    .c{text-align:center}
+    tfoot td{background:#FEF3E6}
+    .signoff{display:grid;grid-template-columns:2fr 2fr 1fr;gap:28px 24px;margin-top:36px;break-inside:avoid}
+    .signoff div{border-bottom:1px solid #1a1917;height:34px;position:relative}
+    .signoff span{position:absolute;top:38px;left:0;font-size:9pt;color:#6b6963}`);
+}
+
+async function exportPayoutExcel(){
+  const rows = payoutRows(reportList());
+  if(!rows.length){ showToast('No QAM reviews in those months', 'var(--amber)'); return; }
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJS(); } catch(err){ showToast(err.message, 'var(--red)'); return; }
+  const wb = newWorkbook(ExcelJS);
+  const ws = wb.addWorksheet('Payouts', {properties:{tabColor:{argb:XL.purple}}, views:[{state:'frozen', ySplit:4, showGridLines:false}]});
+  const cols = [
+    {h:'Designer', w:24}, {h:'Type', w:8}, {h:'Period', w:16}, {h:'Review date', w:13}, {h:'Lead reviewer', w:20},
+    {h:'Audit /10', w:10}, {h:'Behaviour /10', w:11}, {h:'Overall', w:10}, {h:'Agreed payout', w:30}, {h:'Amount ($)', w:14}
+  ];
+  ws.columns = cols.map(c=>({width:c.w}));
+  const base = {name:'Arial', size:10, color:{argb:XL.txt}};
+  ws.mergeCells(1, 1, 1, cols.length);
+  ws.getCell(1, 1).value = `QAM bonus payouts — ${rangeLabel()}`;
+  ws.getCell(1, 1).font = {...base, bold:true, size:14};
+  ws.getRow(1).height = 24;
+  ws.mergeCells(2, 1, 2, cols.length);
+  ws.getCell(2, 1).value = `Prepared by ${me ? me.name : ''} on ${reportDay()}. Amount ($) is filled in where the agreed payout is a dollar figure; fill in the rest.`;
+  ws.getCell(2, 1).font = {...base, italic:true, size:9, color:{argb:XL.muted}};
+  const head = ws.getRow(4);
+  cols.forEach((c,i)=>{
+    const cell = head.getCell(i+1);
+    cell.value = c.h;
+    cell.font = {...base, bold:true, size:9.5};
+    cell.fill = xlFill(XL.head);
+    cell.alignment = {wrapText:true, vertical:'middle', horizontal: i>=5 && i<=7 ? 'center' : 'left'};
+    cell.border = {bottom:xlBorder(XL.grid)};
+  });
+  head.height = 22;
+  rows.forEach((r, idx)=>{
+    const row = ws.getRow(idx + 5);
+    [
+      r.d.designer || '', r.d.mode, r.d.period || '', xlDate(r.d.date) || r.d.date || '', r.d.reviewer || '',
+      r.aa===null ? '' : +r.aa.toFixed(1), r.ba===null ? '' : +r.ba.toFixed(1), r.ov===null ? '' : r.ov/100,
+      r.payout || 'Not entered', r.amount===null ? null : r.amount
+    ].forEach((v, i)=>{ row.getCell(i+1).value = v; });
+    row.eachCell({includeEmpty:true}, (cell, c)=>{
+      cell.font = {...base};
+      cell.alignment = {vertical:'top', wrapText:true, horizontal: c>=6 && c<=8 ? 'center' : 'left'};
+      cell.border = {bottom:xlBorder('FFE5E7EB')};
+      if(idx % 2) cell.fill = xlFill('FFF8F9FA');
+    });
+    row.getCell(1).font = {...base, bold:true};
+    row.getCell(4).numFmt = 'd mmm yyyy';
+    row.getCell(6).numFmt = '0.0';
+    row.getCell(7).numFmt = '0.0';
+    row.getCell(8).numFmt = '0%';
+    row.getCell(10).numFmt = '$#,##0.00';
+    if(!r.payout) row.getCell(9).font = {...base, italic:true, color:{argb:XL.amber}};
+  });
+  const first = 5, last = 4 + rows.length, tot = ws.getRow(last + 1);
+  tot.getCell(9).value = 'Total';
+  tot.getCell(10).value = {formula:`SUM(J${first}:J${last})`};
+  tot.getCell(10).numFmt = '$#,##0.00';
+  [9, 10].forEach(c=>{
+    tot.getCell(c).font = {...base, bold:true};
+    tot.getCell(c).fill = xlFill(XL.brandLt);
+    tot.getCell(c).border = {top:xlBorder(XL.grid)};
+  });
+  // Sign-off lines for the approver and accounts.
+  [['Approved by', last + 4], ['Processed by (accounts)', last + 6]].forEach(([text, r])=>{
+    const row = ws.getRow(r);
+    row.getCell(1).value = text;
+    row.getCell(1).font = {...base, bold:true};
+    [[2, 5], [6, 8], [9, 9]].forEach(([a, b])=>{
+      if(a!==b) ws.mergeCells(r, a, r, b);
+      ws.getCell(r, a).border = {bottom:xlBorder(XL.txt)};
+    });
+    ws.getCell(r + 1, 2).value = 'Name';
+    ws.getCell(r + 1, 6).value = 'Signature';
+    ws.getCell(r + 1, 9).value = 'Date';
+    [2, 6, 9].forEach(c=>{ ws.getCell(r + 1, c).font = {...base, size:8, color:{argb:XL.muted}}; });
+    row.height = 26;
+  });
+  ws.autoFilter = {from:{row:4, column:1}, to:{row:last, column:cols.length}};
+  ws.pageSetup = {paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:0, printTitlesRow:'4:4',
+    margins:{left:0.4, right:0.4, top:0.5, bottom:0.5, header:0.3, footer:0.3}};
+  await downloadWorkbook(wb, `QAM_Payouts_${xlFileName(rangeLabel())}.xlsx`);
+  showToast(`Exported ${rows.length} payout${rows.length===1?'':'s'}`);
+}
+
+// ── Every review in the months, one PDF ──
+function exportReviewsPDF(){
+  const list = reportList().sort((a,b)=>!a.designer - !b.designer || a.designer.localeCompare(b.designer) ||(monthKey(a)||0)-(monthKey(b)||0) || a.mode.localeCompare(b.mode));
+  if(!list.length){ showToast('No reviews in those months', 'var(--amber)'); return; }
+  const contents = `
+    <div class="doc-title">Austruss reviews — ${esc(rangeLabel())}</div>
+    <div class="meta-row"><span><strong>Reviews:</strong> ${list.length}</span><span><strong>Printed:</strong> ${reportDay()}</span></div>
+    <table><thead><tr><th>Designer</th><th>Type</th><th>Period</th><th>Date</th><th>Lead reviewer</th></tr></thead>
+    <tbody>${list.map(d=>`<tr><td>${esc(d.designer||'—')}</td><td>${d.mode}</td><td>${esc(d.period||'')}</td><td>${esc(niceDate(d.date))}</td><td>${esc(d.reviewer||'')}</td></tr>`).join('')}</tbody></table>`;
+  printDoc(`Austruss_Reviews_${xlFileName(rangeLabel())}`,
+    contents + list.map(d=>`<div class="pb">${pdfReviewBody(d)}</div>`).join(''),
+    `.pb{break-before:page;page-break-before:always}`);
+}
+
+// ── Recognition, grouped by the person recognised ──
+// A typed name joins a team member when it's clearly them ("Nat" → Natalie
+// Smith); an unclear one ("Ali", with two Alis) keeps its own group.
+function recognitionGroups(list){
+  const teamNames = team.map(m=>m.name);
+  const weight = n => teamNames.includes(n) ? 2 : 0;
+  const groups = new Map();
+  list.forEach(d=>(d.recognition||[]).forEach(x=>{
+    const typed = String(x.member||'').trim(), why = String(x.why||'').trim();
+    if(!typed && !why) return;
+    let name = typed || '(no name given)';
+    if(typed){ const s = suggestPerson(typed, teamNames, weight); if(s.to) name = s.to; }
+    const key = personNorm(name);
+    if(!groups.has(key)) groups.set(key, {name, items:[]});
+    groups.get(key).items.push({why, typed, period:d.period||'', date:d.date||'', designer:d.designer||'', reviewer:d.reviewer||'', mode:d.mode, t:reviewTime(d)});
+  }));
+  return [...groups.values()]
+    .map(g=>({...g, items:g.items.sort((a,b)=>b.t-a.t)}))
+    .sort((a,b)=>a.name.localeCompare(b.name));
+}
+const raisedIn = it => it.designer ? `${it.designer}’s ${it.mode}` : it.mode;
+
+function exportRecognitionPDF(){
+  const groups = recognitionGroups(reportList());
+  if(!groups.length){ showToast('No recognition in those months', 'var(--amber)'); return; }
+  const total = groups.reduce((s,g)=>s + g.items.length, 0);
+  const body = `
+    <div class="doc-title">Recognition — ${esc(rangeLabel())}</div>
+    <div class="meta-row"><span><strong>Recognitions:</strong> ${total}</span><span><strong>People:</strong> ${groups.length}</span><span><strong>Printed:</strong> ${reportDay()}</span></div>
+    <table style="width:auto;min-width:50%"><thead><tr><th>Person</th><th class="c">Recognitions</th></tr></thead>
+    <tbody>${[...groups].sort((a,b)=>b.items.length-a.items.length || a.name.localeCompare(b.name)).map(g=>`<tr><td>${esc(g.name)}</td><td class="c">${g.items.length}</td></tr>`).join('')}</tbody></table>
+    ${groups.map(g=>`<div class="grp">
+      <h2>${esc(g.name)} — ${g.items.length} recognition${g.items.length===1?'':'s'}</h2>
+      <table><thead><tr><th style="width:16%">Period</th><th style="width:24%">Raised in</th><th>Why</th></tr></thead>
+      <tbody>${g.items.map(it=>`<tr><td>${esc(it.period)}</td><td>${esc(raisedIn(it))}${it.typed && it.typed!==g.name ? `<br><span style="color:#6b6963;font-size:9pt">written as “${esc(it.typed)}”</span>` : ''}</td><td>${esc(it.why) || '—'}</td></tr>`).join('')}</tbody></table>
+    </div>`).join('')}`;
+  printDoc(`Recognition_${xlFileName(rangeLabel())}`, body, `.c{text-align:center} .grp{break-inside:avoid-page} td{white-space:pre-wrap}`);
+}
+
+async function exportRecognitionExcel(){
+  const groups = recognitionGroups(reportList());
+  if(!groups.length){ showToast('No recognition in those months', 'var(--amber)'); return; }
+  let ExcelJS;
+  try{ ExcelJS = await loadExcelJS(); } catch(err){ showToast(err.message, 'var(--red)'); return; }
+  const wb = newWorkbook(ExcelJS);
+  const base = {name:'Arial', size:10, color:{argb:XL.txt}};
+  const total = groups.reduce((s,g)=>s + g.items.length, 0);
+  const header = (ws, row, cols)=>{
+    const r = ws.getRow(row);
+    cols.forEach((c,i)=>{
+      const cell = r.getCell(i+1);
+      cell.value = c.h;
+      cell.font = {...base, bold:true, size:9.5};
+      cell.fill = xlFill(XL.head);
+      cell.alignment = {vertical:'middle', wrapText:true, horizontal: c.center ? 'center' : 'left'};
+      cell.border = {bottom:xlBorder(XL.grid)};
+    });
+    r.height = 22;
+  };
+  const title = (ws, text, sub, span)=>{
+    ws.mergeCells(1, 1, 1, span);
+    ws.getCell(1, 1).value = text;
+    ws.getCell(1, 1).font = {...base, bold:true, size:14};
+    ws.getRow(1).height = 24;
+    ws.mergeCells(2, 1, 2, span);
+    ws.getCell(2, 1).value = sub;
+    ws.getCell(2, 1).font = {...base, italic:true, size:9, color:{argb:XL.muted}};
+  };
+
+  // Summary: one row per person, most recognised first.
+  const sum = wb.addWorksheet('Summary', {properties:{tabColor:{argb:XL.brand}}, views:[{state:'frozen', ySplit:3, showGridLines:false}]});
+  const sCols = [{h:'Person', w:28}, {h:'Recognitions', w:13, center:true}, {h:'Latest', w:18}];
+  sum.columns = sCols.map(c=>({width:c.w}));
+  title(sum, `Recognition — ${rangeLabel()}`, `${total} recognitions for ${groups.length} people. Each one is listed on the “By person” sheet.`, 3);
+  header(sum, 3, sCols);
+  [...groups].sort((a,b)=>b.items.length-a.items.length || a.name.localeCompare(b.name)).forEach((g, idx)=>{
+    const row = sum.getRow(idx + 4);
+    [g.name, g.items.length, g.items[0].period].forEach((v,i)=>{ row.getCell(i+1).value = v; });
+    row.eachCell({includeEmpty:true}, (cell, c)=>{
+      cell.font = {...base, bold: c===1};
+      cell.alignment = {vertical:'top', horizontal: c===2 ? 'center' : 'left'};
+      cell.border = {bottom:xlBorder('FFE5E7EB')};
+    });
+  });
+
+  // By person: every recognition, grouped by person (shaded in turn), newest first.
+  const ws = wb.addWorksheet('By person', {views:[{state:'frozen', ySplit:3, showGridLines:false}]});
+  const cols = [{h:'Person', w:24}, {h:'Period', w:16}, {h:'Review date', w:13}, {h:'Raised in', w:26}, {h:'Lead reviewer', w:18}, {h:'Why (achievement)', w:60}, {h:'Name as written', w:18}];
+  ws.columns = cols.map(c=>({width:c.w}));
+  title(ws, `Recognition by person — ${rangeLabel()}`, 'Use the arrows in the header row to filter by person or period.', cols.length);
+  header(ws, 3, cols);
+  let r = 4;
+  groups.forEach((g, gi)=>{
+    g.items.forEach((it, ii)=>{
+      const row = ws.getRow(r++);
+      [g.name, it.period, xlDate(it.date) || it.date, raisedIn(it), it.reviewer, it.why, it.typed && it.typed!==g.name ? it.typed : '']
+        .forEach((v,i)=>{ row.getCell(i+1).value = v; });
+      row.eachCell({includeEmpty:true}, (cell)=>{
+        cell.font = {...base};
+        cell.alignment = {vertical:'top', wrapText:true};
+        cell.border = {bottom:xlBorder('FFE5E7EB'), ...(ii===0 ? {top:xlBorder(XL.grid)} : {})};
+        if(gi % 2) cell.fill = xlFill('FFF8F9FA');
+      });
+      row.getCell(1).font = {...base, bold:true};
+      row.getCell(3).numFmt = 'd mmm yyyy';
+      row.getCell(7).font = {...base, italic:true, color:{argb:XL.muted}};
+      fitRow(row, [[it.why, 60], [raisedIn(it), 26]]);
+    });
+  });
+  ws.autoFilter = {from:{row:3, column:1}, to:{row:r - 1, column:cols.length}};
+  ws.pageSetup = {paperSize:9, orientation:'landscape', fitToPage:true, fitToWidth:1, fitToHeight:0, printTitlesRow:'3:3',
+    margins:{left:0.4, right:0.4, top:0.5, bottom:0.5, header:0.3, footer:0.3}};
+
+  await downloadWorkbook(wb, `Recognition_${xlFileName(rangeLabel())}.xlsx`);
+  showToast(`Exported ${total} recognitions`);
+}
+
 // ── Team members ───────────────────────────────────────────────────────────
 // Designer and Lead reviewer are picked from the team list (worker.js `team`),
 // so a name has to be added once before it can be used and can't be mistyped.
@@ -25526,11 +25962,7 @@ function suggestPerson(raw, cands, weight){
 }
 
 function showTeamPage(){
-  current = null; dirty = false;
-  document.getElementById('topbar').style.display = 'none';
-  // The notes panel belongs to a review: tuck it away here, showForm() brings it back.
-  const np = document.getElementById('notes-panel');
-  if(np && np.style.display!=='none'){ np.dataset.teamHid = '1'; np.style.display = 'none'; }
+  clearForPage();
   const admin = me && me.role==='admin';
   const usage = nameUsage();
   const countFor = name => usage.filter(u=>personNorm(u.name)===personNorm(name))

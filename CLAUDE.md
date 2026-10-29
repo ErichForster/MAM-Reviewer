@@ -46,6 +46,25 @@ so a copy open elsewhere gets the usual 409 check.
 PDF and Word exports. Excel doesn't size merged wrapped rows, so `fitRow()`
 estimates row heights from the text.
 
+## Reports page (2026-10-29)
+
+Sidebar "Reports — payouts · PDFs · recognition" opens a page in the main
+area (`showReportsPage()`) with a month range (chips for this/last month,
+quarter, year, all time, or From/To pickers). A review counts in the month of
+its Period, else its date (`monthKey()`). Three exports:
+- **QAM bonus payouts** (`exportPayoutPDF()` / `exportPayoutExcel()`) — every
+  QAM/YAM in the range: scores, agreed payout, sign-off lines for the approver
+  and accounts. Agreed payout is free text; a dollar figure in it is pulled out
+  (`payoutAmount()`) and totalled. QAMs with no designer and no payout are left off.
+- **All reviews as one PDF** (`exportReviewsPDF()`) — a contents page, then each
+  review on its own page (`pdfReviewBody()`, the same HTML as the ↓ PDF button).
+- **Recognition** (`exportRecognitionPDF()` / `exportRecognitionExcel()`) —
+  grouped by the person recognised. Typed names join a team member when
+  `suggestPerson()` finds one clear match ("Nat" → Nathaniel Newcombe); unclear
+  ones keep their own group.
+
+PDFs open a print window (`printDoc()`, shared CSS `PDF_CSS`); "Save as PDF" there.
+
 ## History
 
 Until 2026-10-08 this was a GitHub Pages page that kept reviews in each
