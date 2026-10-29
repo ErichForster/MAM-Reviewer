@@ -1,0 +1,75 @@
+{
+  "reviews": [],
+  "activeTemplateId": null,
+  "behavTemplates": [],
+  "activeBehavTemplateId": null,
+  "auditTemplates": [
+    {
+      "id": "1791777600000",
+      "name": "Drafting standards (12-point)",
+      "rows": [
+        {
+          "criteria": "Restarting a Job After a Break: The latest architectural drawings downloaded and reviewed before resuming work, to pick up any design changes made since the job was last worked on.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Naming Standard: The approved Excel naming standard used consistently for all project files.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Folder Structure: Project files saved in the standard project folder structure, with no working files left on local drives or desktops.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Overlay All Required Drawings: All relevant drawings overlaid, including Mechanical and Solar Panel Layouts, so their locations are identified and the engineer can allow for their loads in the structural calculations.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Peer Review: A thorough, detailed peer review carried out on every project (not just treated as a hold point), so errors and issues are caught before the work progresses.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Peer Review Comments Closed Out: All peer review comments actioned and checked off before the drawings are issued.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Drawings Issued for Approval: All relevant drawings, including layouts, production drawings and models, issued to the client and engineer for approval.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Approval Comments Actioned: All client and engineer comments from the approval issue recorded, actioned and confirmed before issuing for construction (IFC).",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Revision Numbers: Correct revisions applied (IFA numerical 1, 2, 3; IFC alphabetical A, B, C). FRAMECAD model/CAD changes can be revised separately from the layouts, with every previous FRAMECAD file kept in the Superseded folder.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Issue Records: Every issue to the client and engineer recorded with its date, revision and purpose (IFA / IFC), so the latest issued set can always be confirmed.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Email Trail: All emails on the same RFI, query or technical issue kept in one thread; a new thread started in Outlook, Aconex or Procore when the subject changes significantly.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Job Notes Kept Up to Date: Key decisions, client instructions and open items recorded in the project notes, so the job can be picked up after a break or by someone else.",
+          "pass": "",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "exportedAt": "2026-10-11T23:35:26.482Z"
+}

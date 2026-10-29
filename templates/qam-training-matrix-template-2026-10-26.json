@@ -1,0 +1,75 @@
+{
+  "reviews": [],
+  "activeTemplateId": null,
+  "behavTemplates": [],
+  "activeBehavTemplateId": null,
+  "auditTemplates": [
+    {
+      "id": "1792976400000",
+      "name": "Drafting standards (training matrix)",
+      "rows": [
+        {
+          "criteria": "Client/Architectural Coordination (DT03.02.04): Confirm architectural updates have been reflected in FrameCAD models",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Housekeeping of Project Files (DT09.01.03): Apply correct file naming conventions (e.g. 24313-ARCH-FloorPlan-RevC.pdf)",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Housekeeping of Project Files (DT09.01.01): Maintain correct project folder structure based on company templates (e.g. Docs, DWGs, RFIs)",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "FrameCAD Structure (DT11.01.03): Import an architectural floor plans",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Peer Review: A thorough, detailed peer review carried out on every project (not just treated as a hold point), so errors and issues are caught before the work progresses.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Peer Review Comments Closed Out: All peer review comments actioned and checked off before the drawings are issued.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Drawing Registration & Issue Control (DT05.01.04): Issue drawings with correct transmittal process",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Communication with Clients & Site (DT01.01.02): Interpret builder markups and translate into design changes",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Aconex (DT11.06.07): Apply revision and status codes correctly",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Housekeeping of Project Files (DT09.01.07): Record upload dates, version details, or updates in Smartsheet or the design coordination log",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Email Trail: All emails on the same RFI, query or technical issue kept in one thread; a new thread started in Outlook, Aconex or Procore when the subject changes significantly.",
+          "pass": "",
+          "notes": ""
+        },
+        {
+          "criteria": "Communication with Clients & Site (DT01.01.05): Document phone or site conversations as action items",
+          "pass": "",
+          "notes": ""
+        }
+      ]
+    }
+  ],
+  "exportedAt": "2026-10-25T21:01:16.344Z"
+}

@@ -1,0 +1,45 @@
+{
+  "reviews": [],
+  "auditTemplates": [],
+  "activeTemplateId": null,
+  "behavTemplates": [
+    {
+      "id": "1791774000000_b",
+      "name": "Standards & ownership",
+      "rows": [
+        {
+          "criteria": "Ownership & Accountability - Takes responsibility for their projects from approval through to issue, following up open items without being chased",
+          "score": "",
+          "comment": ""
+        },
+        {
+          "criteria": "Following Company Standards - Consistently applies the Austruss naming, revision, filing and drafting standards without reminders",
+          "score": "",
+          "comment": ""
+        },
+        {
+          "criteria": "Communication & Record Keeping - Keeps clients, engineers and the team informed, with emails, RFIs and decisions kept in the right thread and place",
+          "score": "",
+          "comment": ""
+        },
+        {
+          "criteria": "Openness to Review & Feedback - Welcomes peer review, acts on comments promptly and does not repeat the same mistakes",
+          "score": "",
+          "comment": ""
+        },
+        {
+          "criteria": "Thoroughness - Checks their own work against the latest architectural and engineering information before passing it on or issuing it",
+          "score": "",
+          "comment": ""
+        },
+        {
+          "criteria": "Teamwork & Support - Gives thorough peer reviews to others, shares knowledge and helps keep projects moving when someone is away",
+          "score": "",
+          "comment": ""
+        }
+      ]
+    }
+  ],
+  "activeBehavTemplateId": null,
+  "exportedAt": "2026-10-11T23:34:57.480Z"
+}
