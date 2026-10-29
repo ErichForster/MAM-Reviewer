@@ -159,7 +159,8 @@ export class Reviews extends DurableObject {
       admin();
       const m = this.one("SELECT * FROM team WHERE id = ?", id) || fail(404, "That team member was removed.");
       const used = this.all("SELECT data FROM reviews").map((r) => parse(r.data, {}))
-        .filter((r) => norm(r.designer) === norm(m.name) || norm(r.reviewer) === norm(m.name)).length;
+        .filter((r) => norm(r.designer) === norm(m.name) || norm(r.reviewer) === norm(m.name)
+          || (Array.isArray(r.recognition) ? r.recognition : []).some((x) => x && norm(x.member) === norm(m.name))).length;
       if (used) fail(400, `${m.name} is on ${used} review(s). Hide them instead, or merge them into someone else.`);
       this.run("DELETE FROM team WHERE id = ?", id);
       this.log(user, `removed ${m.name} from the team list`);
@@ -306,6 +307,9 @@ export class Reviews extends DurableObject {
       let changed = false;
       for (const k of ["designer", "reviewer"]) {
         if (r[k] && olds.has(norm(r[k])) && r[k] !== to) { r[k] = to; changed = true; }
+      }
+      for (const x of Array.isArray(r.recognition) ? r.recognition : []) {
+        if (x && x.member && olds.has(norm(x.member)) && x.member !== to) { x.member = to; changed = true; }
       }
       if (!changed) continue;
       this.run("UPDATE reviews SET data = ?, updated = ?, updated_by = ? WHERE id = ?", JSON.stringify(r), now, user.name, row.id);

@@ -26,9 +26,14 @@ database; every reviewer signs in with their name and a 4-digit PIN.
 
 ## Team list (2026-10-29)
 
-Designer and Lead reviewer are `<select>`s filled from the `team` table
-(`fillPersonSelect()`), so a person is added once (Team page, or "+ Add team
-member…" in the box) and can't be mistyped. Reviews still store the name as a
+Designer, Lead reviewer and the Recognition member names are `<select>`s
+filled from the `team` table (`fillPersonSelect()`), so a person is added once
+(Team page, or "+ Add team member…" in the box) and can't be mistyped.
+Old free-text values still show, marked "(not in team list)". Tidy up names,
+renames and merges cover recognition names too (`nameUsage()` counts them;
+`renameInReviews()` rewrites `recognition[].member`); a name only ever
+recognised ("Erich / Jesse") defaults to "Leave for now" and is never offered
+as a merge target. Reviews still store the name as a
 plain string — no change to the review shape. Account tab → Team members
 opens the page: anyone can add; admins rename (renames the name on every
 review), hide, remove (only if unused) and "Tidy up names", which lists every

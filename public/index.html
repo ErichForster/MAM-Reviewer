@@ -24266,7 +24266,7 @@ function renderForm(){
         <thead><tr><th style="width:28%">Member name</th><th>Why (achievement)</th><th style="width:28px"></th></tr></thead>
         <tbody>
           ${(current.recognition||[]).map((r,i)=>`<tr class="row-rec">
-            <td><input data-f="member" value="${esc(r.member)}" placeholder="Name" oninput="markDirty()"></td>
+            <td><select data-f="member" data-person="${i}" onchange="onPersonPick(this,'recognition')"></select></td>
             <td><textarea data-f="why" placeholder="Achievement" oninput="markDirty();autoGrow(this)" rows="1" style="white-space:pre-wrap;overflow:hidden">${esc(r.why)}</textarea></td>
             <td class="del-cell"><button class="del-row" onclick="removeRow('rec',${i})" title="Remove row">×</button></td>
           </tr>`).join('')}
@@ -24438,6 +24438,8 @@ function renderForm(){
   </div><div style="height:32px"></div>`;
 
   document.getElementById('formBody').innerHTML = html;
+  // Recognition names come from the team list, like Designer and Lead reviewer.
+  document.querySelectorAll('.row-rec [data-person]').forEach(sel=>fillPersonSelect(sel, (current.recognition[+sel.dataset.person]||{}).member || ''));
   autoGrowAll('.et textarea');
 }
 
@@ -25903,21 +25905,26 @@ function openTeamPage(){
   showTeamPage();
 }
 
-// How often each exact spelling is used, as designer and as lead reviewer.
+// How often each exact spelling is used: as designer, as lead reviewer and as
+// the person recognised in section 2.
 function nameUsage(){
   const use = new Map();
+  const count = (v, slot, r)=>{
+    if(!v || !String(v).trim()) return;
+    if(!use.has(v)) use.set(v, {name:v, asDesigner:0, asReviewer:0, asRecognised:0, periods:new Set()});
+    const u = use.get(v);
+    u[slot]++;
+    if(r.period) u.periods.add(r.period);
+  };
   reviews.forEach(r=>{
-    [['designer','asDesigner'], ['reviewer','asReviewer']].forEach(([k, slot])=>{
-      const v = r[k];
-      if(!v || !String(v).trim()) return;
-      if(!use.has(v)) use.set(v, {name:v, asDesigner:0, asReviewer:0, periods:new Set()});
-      const u = use.get(v);
-      u[slot]++;
-      if(r.period) u.periods.add(r.period);
-    });
+    count(r.designer, 'asDesigner', r);
+    count(r.reviewer, 'asReviewer', r);
+    (r.recognition||[]).forEach(x=>count(x.member, 'asRecognised', r));
   });
   return [...use.values()];
 }
+const usedOn = u => [u.asDesigner ? `${u.asDesigner} as designer` : '', u.asReviewer ? `${u.asReviewer} as reviewer` : '',
+  u.asRecognised ? `${u.asRecognised} recognition${u.asRecognised===1?'':'s'}` : ''].filter(Boolean).join(' · ');
 
 function levenshtein(a, b){
   const d = Array.from({length:a.length+1}, (_,i)=>[i]);
@@ -25950,7 +25957,8 @@ function suggestPerson(raw, cands, weight){
     hits = full.filter(c=>{
       const cn = personNorm(c), ct = cn.split(' ');
       if(weight(c) < weight(raw) || (weight(c) === weight(raw) && c < raw)) return false;
-      if(levenshtein(n, cn) <= 2) return true;
+      // Typos in a longer name ("Muhamad Ali"); short ones like "Nic S" vs "Nic G" are different people.
+      if(n.length >= 8 && levenshtein(n, cn) <= 2) return true;
       // "Nic G" = Nicholas Geljic: each word starts the matching word.
       return toks.length===ct.length && toks.every((t,i)=>ct[i].startsWith(t));
     });
@@ -25966,11 +25974,12 @@ function showTeamPage(){
   const admin = me && me.role==='admin';
   const usage = nameUsage();
   const countFor = name => usage.filter(u=>personNorm(u.name)===personNorm(name))
-    .reduce((s,u)=>({d:s.d+u.asDesigner, r:s.r+u.asReviewer}), {d:0, r:0});
+    .reduce((s,u)=>({asDesigner:s.asDesigner+u.asDesigner, asReviewer:s.asReviewer+u.asReviewer, asRecognised:s.asRecognised+u.asRecognised}),
+      {asDesigner:0, asReviewer:0, asRecognised:0});
 
   const members = team.map(m=>{
     const c = countFor(m.name);
-    const uses = [c.d ? `${c.d} as designer` : '', c.r ? `${c.r} as reviewer` : ''].filter(Boolean).join(' · ') || 'not on any review yet';
+    const uses = usedOn(c) || 'not on any review yet';
     const nm = esc(m.name).replace(/'/g,'&#39;');
     return `<tr${m.active ? '' : ' style="opacity:.55"'}>
       <td style="padding:7px 8px;font-weight:600">${esc(m.name)}${m.active ? '' : ' <span style="font-weight:400;color:var(--txt3)">(hidden)</span>'}</td>
@@ -25978,7 +25987,7 @@ function showTeamPage(){
       <td style="padding:5px 8px;text-align:right;white-space:nowrap">${admin ? `
         <button class="btn-export-json" onclick="renameMember('${m.id}','${nm}')">Rename</button>
         <button class="btn-export-json" onclick="hideMember('${m.id}',${m.active ? 'false' : 'true'})">${m.active ? 'Hide' : 'Show'}</button>
-        ${c.d || c.r ? '' : `<button class="btn-del" title="Remove" onclick="removeMember('${m.id}','${nm}')">✕</button>`}` : ''}
+        ${c.asDesigner || c.asReviewer || c.asRecognised ? '' : `<button class="btn-del" title="Remove" onclick="removeMember('${m.id}','${nm}')">✕</button>`}` : ''}
       </td></tr>`;
   }).join('');
 
@@ -26011,24 +26020,27 @@ function tidySection(usage){
     return `<div class="section"><div class="sec-hdr"><div class="stitle">Tidy up names</div></div>
       <div class="sec-body" style="font-size:12px;color:var(--green)">✓ Every name on every review matches the team list.</div></div>`;
   }
-  // Possible targets: the team, plus the full (two-word) names on reviews.
-  const fullOnReviews = [...new Set(usage.map(u=>u.name.trim().replace(/\s+/g,' ')).filter(n=>n.includes(' ')))];
+  // Possible targets: the team, plus the full (two-word) designer and reviewer
+  // names. Not names only ever recognised: "Erich / Jesse" isn't a person.
+  const fullOnReviews = [...new Set(usage.filter(u=>u.asDesigner || u.asReviewer)
+    .map(u=>u.name.trim().replace(/\s+/g,' ')).filter(n=>n.includes(' ')))];
   const cands = [...new Set([...teamNames, ...fullOnReviews])].sort((a,b)=>a.localeCompare(b));
   const weight = name => teamNames.includes(name) ? 1e9
-    : usage.filter(u=>personNorm(u.name)===personNorm(name)).reduce((s,u)=>s+u.asDesigner+u.asReviewer, 0);
+    : usage.filter(u=>personNorm(u.name)===personNorm(name)).reduce((s,u)=>s+u.asDesigner+u.asReviewer+u.asRecognised, 0);
 
   const rows = tidyRows.map((u, i)=>{
     const tidy = u.name.trim().replace(/\s+/g,' ');
     const s = suggestPerson(u.name, cands, weight);
     // Default: the one clear match; nothing when it could be several people;
-    // otherwise keep the name and add it to the team.
-    const pick = s.to ? 'to:' + s.to : s.maybe ? '' : 'add';
+    // otherwise keep the name and add it to the team — unless it's only ever
+    // been recognised ("Erich / Jesse", "Whole team"), which is left alone.
+    const pick = s.to ? 'to:' + s.to : s.maybe || !(u.asDesigner || u.asReviewer) ? '' : 'add';
     const note = s.maybe ? `<div style="font-size:11px;color:var(--amber)">Could be ${s.maybe.map(esc).join(' or ')} — check the periods</div>`
       : tidy!==u.name ? `<div style="font-size:11px;color:var(--txt3)">has extra spaces</div>` : '';
     const opts = [`<option value="">Leave for now</option>`,
       `<option value="add"${pick==='add'?' selected':''}>Keep as “${esc(tidy)}” and add to the team</option>`,
       ...cands.filter(c=>c!==u.name).map(c=>`<option value="to:${esc(c)}"${pick==='to:'+c?' selected':''}>Same person as ${esc(c)}</option>`)].join('');
-    const used = [u.asDesigner ? `${u.asDesigner} as designer` : '', u.asReviewer ? `${u.asReviewer} as reviewer` : ''].filter(Boolean).join(' · ');
+    const used = usedOn(u);
     return `<tr>
       <td style="padding:7px 8px"><span style="font-weight:600;white-space:pre">“${esc(u.name)}”</span>${note}</td>
       <td style="padding:7px 8px;color:var(--txt2);font-size:11px">${used}<div style="color:var(--txt3)">${[...u.periods].slice(0,4).map(esc).join(', ')}${u.periods.size>4?'…':''}</div></td>
@@ -26063,7 +26075,7 @@ async function applyTidy(){
     if(!groups.has(to)) groups.set(to, []);
     groups.get(to).push(from);
   }
-  const affected = reviews.filter(r=>[r.designer, r.reviewer].some(v=>choice.has(v))).length;
+  const affected = reviews.filter(r=>[r.designer, r.reviewer, ...(r.recognition||[]).map(x=>x.member)].some(v=>choice.has(v))).length;
   const merged = [...choice.keys()].filter(f=>final(f).trim()!==f.trim()).length;
   openDialog('Tidy up names',
     `Merge ${merged} spelling(s) and set up ${groups.size} team member(s). ${affected} review(s) will be updated for everyone. Go ahead?`,
